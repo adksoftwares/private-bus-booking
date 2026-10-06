@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
-import { requireOwner } from '@/lib/auth-server';
+import { getAuthenticatedUser, requireOwner } from '@/lib/auth-server';
 import { createTripSchema, formatZodError } from '@/lib/validation/schemas';
 import { Trip, BusSnapshot, RouteSnapshot, BookedSeatInfo } from '@/types/trip';
 import { Json } from '@/types/database';
@@ -11,6 +11,17 @@ export async function GET(req: Request) {
     const ownerId = searchParams.get('ownerId');
     const date = searchParams.get('date');
 
+    // Public trip search is allowed, but an owner-scoped query is privileged.
+    // Never trust a caller-supplied ownerId as an authorization boundary.
+    const authenticatedUser = ownerId ? await requireOwner(req) : await getAuthenticatedUser(req);
+    const effectiveOwnerId = ownerId
+      ? (authenticatedUser.isAdmin ? ownerId : authenticatedUser.uid)
+      : null;
+
+    if (ownerId && !authenticatedUser.isAdmin && ownerId !== authenticatedUser.uid) {
+      return NextResponse.json({ error: 'Access denied. You can only view your own trip schedules.' }, { status: 403 });
+    }
+
     const supabase = getSupabaseAdminClient();
     let query = supabase
       .from('trips')
@@ -18,8 +29,8 @@ export async function GET(req: Request) {
       .order('departure_date', { ascending: false })
       .order('departure_time', { ascending: true });
 
-    if (ownerId) {
-      query = query.eq('owner_id', ownerId);
+    if (effectiveOwnerId) {
+      query = query.eq('owner_id', effectiveOwnerId);
     }
     if (date) {
       query = query.eq('departure_date', date);
@@ -39,7 +50,7 @@ export async function GET(req: Request) {
     if (tripIds.length > 0) {
       const { data: seatLocks } = await supabase
         .from('seat_locks')
-        .select('trip_id, seat_id, status, user_id, expires_at')
+        .select('trip_id, seat_id, status, expires_at')
         .in('trip_id', tripIds);
 
       const now = Date.now();
@@ -48,7 +59,8 @@ export async function GET(req: Request) {
           if (!locksMap[lock.trip_id]) locksMap[lock.trip_id] = {};
           locksMap[lock.trip_id][lock.seat_id] = {
             status: lock.status as BookedSeatInfo['status'],
-            uid: lock.user_id
+            // Do not expose another passenger's identity through a public API.
+            uid: 'masked'
           };
         }
       }

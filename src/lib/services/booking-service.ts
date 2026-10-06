@@ -131,7 +131,12 @@ export async function atomicLockSeats(
     // If RPC is unavailable, fall back to atomic direct query
   }
 
-  // Fallback: direct query with cleanup of expired locks
+  // Fail closed if the atomic database primitive is unavailable. A direct
+  // read/check/upsert sequence is not transactionally safe under concurrent load.
+  throw new HttpError(503, 'Seat reservation service is temporarily unavailable. Please try again.');
+
+  /*
+  // Legacy non-atomic fallback intentionally disabled.
   await supabase
     .from('seat_locks')
     .delete()
@@ -180,6 +185,7 @@ export async function atomicLockSeats(
   }
 
   return { success: true };
+  */
 }
 
 /**
@@ -592,7 +598,12 @@ export async function cancelBooking(
     if (rpcErr instanceof HttpError) throw rpcErr;
   }
 
-  // 2. Direct transactional fallback
+  // Fail closed when the database transaction is unavailable. Continuing with
+  // separate UPDATE/INSERT/DELETE operations can leave booking and seat state inconsistent.
+  throw new HttpError(503, 'Cancellation service is temporarily unavailable. Please try again.');
+
+  /*
+  // Legacy non-atomic fallback intentionally disabled.
   const { data: bookingData, error: bookingError } = await supabase
     .from('bookings')
     .select('*')
@@ -694,6 +705,7 @@ export async function cancelBooking(
       ? `Booking cancelled successfully. You are eligible for a ${refundPercentage}% refund (Rs. ${refundAmount.toFixed(2)}).`
       : 'Booking cancelled successfully. No refund is available within 12 hours of departure.'
   };
+  */
 }
 
 /**
@@ -753,7 +765,12 @@ export async function processPayHereNotification(params: PaymentNotificationPara
     if (rpcErr instanceof HttpError) throw rpcErr;
   }
 
-  // 2. Direct transactional fallback
+  // Fail closed if the atomic payment transaction is unavailable. A payment
+  // webhook must never partially update booking, payment, and seat state.
+  throw new HttpError(503, 'Payment processing service is temporarily unavailable. Please retry the notification.');
+
+  /*
+  // Legacy non-atomic fallback intentionally disabled.
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .select('*')
@@ -862,6 +879,7 @@ export async function processPayHereNotification(params: PaymentNotificationPara
 
     return { success: false, message: `Payment failed with status code ${statusCode}`, bookingId: orderId, status: 'payment_failed' };
   }
+  */
 }
 
 export const confirmBookingPayment = processPayHereNotification;
@@ -907,7 +925,12 @@ export async function atomicBoardTicket(bookingId: string, staffUser: Authentica
     // Fall back to direct query with assignment check
   }
 
-  // Fallback: Direct conditional query
+  // Fail closed if the atomic boarding primitive is unavailable. A read followed
+  // by a conditional write is not a sufficient replacement for a transaction.
+  return { success: false, reason: 'TRANSACTION_UNAVAILABLE', message: 'Boarding service is temporarily unavailable. Please retry.' };
+
+  /*
+  // Legacy non-atomic fallback intentionally disabled.
   const { data: booking, error: findError } = await supabase
     .from('bookings')
     .select('*')

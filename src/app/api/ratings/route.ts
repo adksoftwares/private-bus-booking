@@ -106,23 +106,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Only confirmed or completed journeys can be reviewed.' }, { status: 400 });
     }
 
-    // Verify ownership
-    if (authUser) {
-      if (booking.user_id && booking.user_id !== authUser.uid) {
+    // Authorization is based on the booking itself, never merely on whether the
+    // caller happens to be authenticated. Guest bookings still require their
+    // cryptographic access token even when the caller is signed in.
+    if (booking.user_id) {
+      if (!authUser || booking.user_id !== authUser.uid) {
         return NextResponse.json({ error: 'You can only rate trips booked under your account.' }, { status: 403 });
       }
     } else {
-      // For guest, accessToken is mandatory and must match to prevent unverified review spoofing
       if (!body.accessToken || !booking.access_token || body.accessToken !== booking.access_token) {
         return NextResponse.json({ error: 'Valid booking access token is required to submit a verified review.' }, { status: 403 });
       }
     }
 
-    // Verify the booking is actually for this specific bus
-    const tripSnapshot = booking.trip_snapshot as Record<string, unknown> | null;
-    const busSnapshot = tripSnapshot?.busSnapshot as Record<string, unknown> | null;
-    const tripBusId = (tripSnapshot?.busId as string) || (busSnapshot?.id as string) || '';
-    if (tripBusId && tripBusId !== busId) {
+    // Resolve the bus from the authoritative trip row. Do not trust a mutable
+    // booking snapshot or a client-supplied bus relationship for authorization.
+    const { data: tripRecord, error: tripLookupError } = await supabase
+      .from('trips')
+      .select('bus_id')
+      .eq('id', booking.trip_id)
+      .maybeSingle();
+
+    if (tripLookupError || !tripRecord || tripRecord.bus_id !== busId) {
       return NextResponse.json({ error: 'This booking was for a different bus.' }, { status: 400 });
     }
 

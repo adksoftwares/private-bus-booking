@@ -1,0 +1,73 @@
+{
+  "rules": {
+    "trips": {
+      ".read": true,
+      ".indexOn": ["departureDate", "ownerId"],
+      "$tripId": {
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists() || !data.exists())"
+      }
+    },
+    "routes": {
+      ".read": true,
+      ".indexOn": ["ownerId"],
+      "$routeId": {
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists() || !data.exists())"
+      }
+    },
+    "buses": {
+      ".read": true,
+      ".indexOn": ["ownerId"],
+      "$busId": {
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists() || !data.exists())"
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('users').child(auth.uid).child('role').val() === 'Conductor')",
+        ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin')"
+      }
+    },
+    "owners": {
+      ".read": true,
+      "$uid": {
+        ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin')"
+      }
+    },
+    "seatLocks": {
+      ".read": true,
+      "$tripId": {
+        "$seatId": {
+          ".write": "auth != null"
+        }
+      }
+    },
+    "bookings": {
+      ".read": "auth != null",
+      "$bookingId": {
+        ".write": "auth != null"
+      }
+    },
+    "tickets": {
+      ".read": "auth != null",
+      "$ticketId": {
+        ".write": "auth != null"
+      }
+    },
+    "payments": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists())",
+      "$paymentId": {
+        ".write": "auth != null"
+      }
+    },
+    "refunds": {
+      ".read": "auth != null",
+      "$refundId": {
+        ".write": "auth != null"
+      }
+    },
+    "indexes": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

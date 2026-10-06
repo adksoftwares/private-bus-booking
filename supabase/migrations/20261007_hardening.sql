@@ -666,3 +666,21 @@ CREATE POLICY "Admins can view audit logs" ON public.audit_logs
 
 -- Revoke dangerous direct client modification of audit_logs
 REVOKE INSERT, UPDATE, DELETE ON public.audit_logs FROM anon, authenticated;
+
+-- SECURITY DEFINER functions must never be callable directly by untrusted clients.
+-- Application code invokes them through the server-side service-role client only.
+REVOKE EXECUTE ON FUNCTION public.lock_seats_atomic(TEXT, TEXT[], TEXT, TEXT, INTEGER) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.unlock_seat_atomic(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.confirm_booking_seats_atomic(TEXT, TEXT[], TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.process_payment_webhook_atomic(TEXT, TEXT, NUMERIC, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.board_passenger_atomic(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.cancel_booking_atomic(TEXT, TEXT, TEXT, BOOLEAN) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_trip_seat_availability(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.lock_seats_atomic(TEXT, TEXT[], TEXT, TEXT, INTEGER) TO service_role;
+GRANT EXECUTE ON FUNCTION public.unlock_seat_atomic(TEXT, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.confirm_booking_seats_atomic(TEXT, TEXT[], TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.process_payment_webhook_atomic(TEXT, TEXT, NUMERIC, TEXT, TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION public.board_passenger_atomic(TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.cancel_booking_atomic(TEXT, TEXT, TEXT, BOOLEAN) TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_trip_seat_availability(TEXT, TEXT) TO service_role;

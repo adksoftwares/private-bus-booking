@@ -8,14 +8,24 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const ownerId = searchParams.get('ownerId');
 
+    // Public bus discovery remains available. Owner-scoped fleet queries are privileged.
+    let effectiveOwnerId: string | null = null;
+    if (ownerId) {
+      const user = await requireOwner(req);
+      if (!user.isAdmin && ownerId !== user.uid) {
+        return NextResponse.json({ error: 'Access denied. You can only view your own fleet.' }, { status: 403 });
+      }
+      effectiveOwnerId = user.isAdmin ? ownerId : user.uid;
+    }
+
     const supabase = getSupabaseAdminClient();
     let query = supabase
       .from('buses')
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (ownerId) {
-      query = query.eq('owner_id', ownerId);
+    if (effectiveOwnerId) {
+      query = query.eq('owner_id', effectiveOwnerId);
     }
 
     const { data: busesData, error } = await query;

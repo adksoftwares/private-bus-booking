@@ -13,7 +13,7 @@ import { useTranslations } from 'next-intl';
 
 export default function BookingPage() {
   const { tripId } = useParams();
-  const { user } = useAuth();
+  const { user, authFetch } = useAuth();
   const router = useRouter();
   const t = useTranslations('booking');
   
@@ -109,7 +109,7 @@ export default function BookingPage() {
       const guestSessionId = typeof window !== 'undefined' ? sessionStorage.getItem('bus_guest_session_id') : null;
 
       // Authoritative Server-side Pending Booking Creation (Supports both Guest and Account)
-      const response = await fetch('/api/bookings/create-pending', {
+      const response = await authFetch('/api/bookings/create-pending', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

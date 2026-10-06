@@ -4,31 +4,31 @@
       ".read": true,
       ".indexOn": ["departureDate", "ownerId"],
       "$tripId": {
-        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists() || !data.exists())"
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || (root.child('owners').child(auth.uid).exists() && (newData.child('ownerId').val() === auth.uid || data.child('ownerId').val() === auth.uid)))"
       }
     },
     "routes": {
       ".read": true,
       ".indexOn": ["ownerId"],
       "$routeId": {
-        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists() || !data.exists())"
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists())"
       }
     },
     "buses": {
       ".read": true,
       ".indexOn": ["ownerId"],
       "$busId": {
-        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists() || !data.exists())"
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || (root.child('owners').child(auth.uid).exists() && (newData.child('ownerId').val() === auth.uid || data.child('ownerId').val() === auth.uid)))"
       }
     },
     "users": {
       "$uid": {
-        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('users').child(auth.uid).child('role').val() === 'Conductor')",
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin')",
         ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin')"
       }
     },
     "owners": {
-      ".read": true,
+      ".read": "auth != null",
       "$uid": {
         ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin')"
       }
@@ -37,37 +37,49 @@
       ".read": true,
       "$tripId": {
         "$seatId": {
-          ".write": "auth != null"
+          ".write": "auth != null || !data.exists()"
         }
       }
     },
     "bookings": {
-      ".read": "auth != null",
       "$bookingId": {
-        ".write": "auth != null"
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'Admin' || (root.child('users').child(auth.uid).child('role').val() === 'Owner' && data.child('ownerId').val() === auth.uid))",
+        ".write": false
       }
     },
     "tickets": {
-      ".read": "auth != null",
       "$ticketId": {
-        ".write": "auth != null"
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('users').child(auth.uid).child('role').val() === 'Conductor' || (root.child('users').child(auth.uid).child('role').val() === 'Owner' && data.child('ownerId').val() === auth.uid))",
+        ".write": false
       }
     },
     "payments": {
       ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists())",
-      "$paymentId": {
-        ".write": "auth != null"
-      }
+      ".write": false
     },
     "refunds": {
-      ".read": "auth != null",
-      "$refundId": {
-        ".write": "auth != null"
-      }
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'Admin' || root.child('owners').child(auth.uid).exists())",
+      ".write": false
+    },
+    "busReviews": {
+      ".read": true,
+      ".write": false
     },
     "indexes": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      "userBookings": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'Admin')",
+          ".write": false
+        }
+      },
+      "bookingReferences": {
+        ".read": false,
+        ".write": false
+      },
+      "phoneBookings": {
+        ".read": false,
+        ".write": false
+      }
     }
   }
 }

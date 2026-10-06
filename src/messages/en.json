@@ -64,7 +64,7 @@
   "booking": {
     "selectSeats": "Select Your Seats",
     "maxSeats": "Max 6 seats",
-    "reservedNotice": "Selected seats are temporarily reserved for 5 minutes during checkout.",
+    "reservedNotice": "Selected seats are temporarily reserved for 10 minutes during checkout.",
     "tripSummary": "Trip Summary",
     "passengerInfo": "Passenger Information",
     "fullName": "Full Name",

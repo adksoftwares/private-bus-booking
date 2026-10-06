@@ -18,7 +18,7 @@ interface VerificationResult {
 }
 
 export default function ScannerPage() {
-  const { user, isStaff, loading: authLoading } = useAuth();
+  const { user, isStaff, loading: authLoading, authFetch } = useAuth();
   const [bookingId, setBookingId] = useState('');
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,12 +31,11 @@ export default function ScannerPage() {
     setResult(null);
 
     try {
-      const res = await fetch('/api/tickets/verify', {
+      const res = await authFetch('/api/tickets/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bookingId: bookingId.trim().toUpperCase(),
-          staffUid: user.uid,
           action: 'lookup'
         })
       });
@@ -60,12 +59,11 @@ export default function ScannerPage() {
     setBoardingLoading(true);
 
     try {
-      const res = await fetch('/api/tickets/verify', {
+      const res = await authFetch('/api/tickets/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bookingId: result.booking.id,
-          staffUid: user.uid,
           action: 'board'
         })
       });

@@ -10,7 +10,7 @@ import Image from 'next/image';
 import { Booking } from '@/types/booking';
 
 export default function PaymentPage() {
-  const { user } = useAuth();
+  const { user, authFetch } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
@@ -31,11 +31,19 @@ export default function PaymentPage() {
     const loadBooking = async () => {
       try {
         let orderId = urlOrderId;
+        let accessToken = searchParams.get('token') || '';
         if (!orderId) {
           const savedDraft = sessionStorage.getItem('bookingDraft');
           if (savedDraft) {
-            const parsed = JSON.parse(savedDraft);
-            orderId = parsed.orderId;
+            try {
+              const parsed = JSON.parse(savedDraft);
+              orderId = parsed.orderId;
+              if (!accessToken && parsed.accessToken) {
+                accessToken = parsed.accessToken;
+              }
+            } catch (e) {
+              console.error("Failed to parse bookingDraft:", e);
+            }
           }
         }
 
@@ -44,7 +52,30 @@ export default function PaymentPage() {
           return;
         }
 
-        // Fetch authoritative pending booking from Firebase
+        // Try lookup endpoint first (handles guest with accessToken and account users)
+        try {
+          const res = await authFetch('/api/bookings/lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bookingId: orderId,
+              accessToken: accessToken || undefined
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.booking) {
+              setBooking(data.booking);
+              setInitializing(false);
+              return;
+            }
+          }
+        } catch {
+          // fallback to client database
+        }
+
+        // Fallback to client RTDB
         const bookingSnap = await get(child(ref(db), `bookings/${orderId}`));
         if (bookingSnap.exists()) {
           setBooking(bookingSnap.val());
@@ -64,7 +95,7 @@ export default function PaymentPage() {
     return () => {
       document.body.removeChild(script);
     };
-  }, [urlOrderId, router]);
+  }, [urlOrderId, searchParams, router, authFetch]);
 
   const handlePayment = async () => {
     if (!booking) return;
@@ -73,7 +104,7 @@ export default function PaymentPage() {
 
     try {
       // 1. Request secure payment hash from our authoritative server endpoint
-      const response = await fetch('/api/payhere/hash', {
+      const response = await authFetch('/api/payhere/hash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

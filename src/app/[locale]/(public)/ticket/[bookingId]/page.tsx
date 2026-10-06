@@ -14,7 +14,7 @@ export default function TicketPage() {
   const { bookingId } = useParams();
   const searchParams = useSearchParams();
   const tokenFromUrl = searchParams.get('token');
-  const { user } = useAuth();
+  const { user, authFetch } = useAuth();
   const router = useRouter();
   const t = useTranslations('ticket');
   
@@ -38,7 +38,7 @@ export default function TicketPage() {
       ? (tokenFromUrl || localStorage.getItem(`ticket_token_${bookingId}`) || '')
       : '';
 
-    fetch('/api/bookings/lookup', {
+    authFetch('/api/bookings/lookup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -73,7 +73,7 @@ export default function TicketPage() {
     return () => {
       isMounted = false;
     };
-  }, [bookingId, user?.uid, tokenFromUrl]);
+  }, [bookingId, user?.uid, tokenFromUrl, authFetch]);
 
   const handlePhoneVerifySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,13 +84,12 @@ export default function TicketPage() {
     setVerifyError('');
 
     try {
-      const res = await fetch('/api/bookings/lookup', {
+      const res = await authFetch('/api/bookings/lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reference: bookingId as string,
-          phone,
-          userId: user?.uid
+          phone
         })
       });
 
@@ -124,12 +123,11 @@ export default function TicketPage() {
 
     try {
       const token = booking.accessToken || (typeof window !== 'undefined' ? localStorage.getItem(`ticket_token_${booking.id}`) : '');
-      const res = await fetch('/api/bookings/link-account', {
+      const res = await authFetch('/api/bookings/link-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reference: booking.id,
-          userId: user.uid,
           accessToken: token,
           phone: booking.passengerPhone
         })

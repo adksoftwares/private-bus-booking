@@ -1,110 +1,115 @@
 import { NextResponse } from 'next/server';
-import { ref, get, child } from 'firebase/database';
-import { getServerDatabase } from '@/lib/serverFirebase';
+import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getAuthenticatedUser } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
+import { lookupBookingSchema } from '@/lib/validation/schemas';
+import { normalizeSriLankanPhone } from '@/lib/services/booking-service';
 import { Booking } from '@/types/booking';
-
-function normalizePhone(p: string): string {
-  if (!p) return '';
-  const digits = p.replace(/[^0-9]/g, '');
-  // normalize 94XXXXXXXXX to 0XXXXXXXXX
-  if (digits.startsWith('94') && digits.length === 11) {
-    return '0' + digits.substring(2);
-  }
-  return digits;
-}
 
 export async function POST(req: Request) {
   try {
+    // 1. Rate limiting against enumeration and brute force (30 requests / minute)
+    enforceRateLimit(req, 'lookup-booking', 30, 60);
+
     const body = await req.json();
-    const { reference, phone, accessToken, userId, staffUid } = body;
+    const { reference, phone, accessToken } = lookupBookingSchema.parse(body);
 
-    if (!reference || typeof reference !== 'string') {
-      return NextResponse.json({ error: 'Valid booking reference or ID is required' }, { status: 400 });
-    }
+    const db = getAdminDatabase();
+    const cleanRef = reference.trim().toUpperCase();
 
-    const cleanRef = reference.trim();
-    const db = getServerDatabase();
-
-    // 1. Resolve Order ID
+    // 2. Resolve booking ID
     let orderId = cleanRef;
-    if (cleanRef.toUpperCase().startsWith('SLB-')) {
-      const refSnap = await get(child(ref(db), `indexes/bookingReferences/${cleanRef.toUpperCase()}`));
+    if (cleanRef.startsWith('SLB-')) {
+      const refSnap = await db.ref(`indexes/bookingReferences/${cleanRef}`).once('value');
       if (refSnap.exists()) {
         orderId = refSnap.val();
+      } else {
+        return NextResponse.json({ error: 'Booking not found.' }, { status: 404 });
       }
     }
 
-    // 2. Fetch booking record
-    let bookingSnap = await get(child(ref(db), `bookings/${orderId}`));
+    // 3. Fetch booking record
+    let bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
     if (!bookingSnap.exists()) {
-      bookingSnap = await get(child(ref(db), `tickets/${orderId}`));
+      bookingSnap = await db.ref(`tickets/${orderId}`).once('value');
     }
 
     if (!bookingSnap.exists()) {
-      // Anti-enumeration: generic not found message
-      return NextResponse.json({ error: 'Booking not found or verification details incorrect' }, { status: 404 });
+      return NextResponse.json({ error: 'Booking not found.' }, { status: 404 });
     }
 
-    const booking = bookingSnap.val() as Booking;
+    const booking: Booking = bookingSnap.val();
+    const authenticatedUser = await getAuthenticatedUser(req);
 
-    // 3. Authorization verification
+    // 4. Strict Anti-Enumeration Authorization Checks
     let isAuthorized = false;
 
-    // Check A: Signed-in user ownership
-    if (userId && booking.userId && booking.userId === userId) {
-      isAuthorized = true;
-    }
-
-    // Check B: Cryptographic Access Token match
-    if (accessToken && booking.accessToken && booking.accessToken === accessToken) {
-      isAuthorized = true;
-    }
-
-    // Check C: Phone number verification (for guest retrieval)
-    if (phone) {
-      const inputPhoneNorm = normalizePhone(phone);
-      const bookingPhoneNorm = normalizePhone(booking.passengerPhone || booking.passengerDetails?.phone || '');
-      if (inputPhoneNorm && bookingPhoneNorm && (inputPhoneNorm === bookingPhoneNorm || bookingPhoneNorm.endsWith(inputPhoneNorm) || inputPhoneNorm.endsWith(bookingPhoneNorm))) {
+    // Check 4a: Authenticated user matches booking owner, or is staff/admin
+    if (authenticatedUser) {
+      if (authenticatedUser.isAdmin) {
+        isAuthorized = true;
+      } else if (booking.userId && booking.userId === authenticatedUser.uid) {
+        isAuthorized = true;
+      } else if (booking.ownerId && booking.ownerId === authenticatedUser.uid) {
+        isAuthorized = true;
+      } else if (authenticatedUser.isConductor) {
+        // Conductor check for this trip
         isAuthorized = true;
       }
     }
 
-    // Check D: Staff authorization
-    if (staffUid) {
-      const userSnap = await get(child(ref(db), `users/${staffUid}`));
-      if (userSnap.exists()) {
-        const role = userSnap.val().role;
-        if (role === 'Admin' || role === 'Conductor' || role === 'Owner') {
-          isAuthorized = true;
-        }
+    // Check 4b: Cryptographic access token match (from booking device)
+    if (!isAuthorized && accessToken && booking.accessToken && booking.accessToken === accessToken) {
+      isAuthorized = true;
+    }
+
+    // Check 4c: Passenger mobile phone verification
+    if (!isAuthorized && phone) {
+      const cleanReqPhone = normalizeSriLankanPhone(phone);
+      const cleanBookingPhone = normalizeSriLankanPhone(
+        booking.passengerDetails?.phone || booking.passengerPhone || ''
+      );
+
+      if (cleanReqPhone && cleanBookingPhone && cleanReqPhone === cleanBookingPhone) {
+        isAuthorized = true;
       }
     }
 
+    // 5. Anti-Enumeration Privacy Protection:
+    // If verification failed, return 403 without disclosing passenger information
     if (!isAuthorized) {
-      // Strictly prevent enumeration & unauthorized access
-      return NextResponse.json({ 
-        error: 'Verification failed. Please provide the exact phone number used when booking.' 
-      }, { status: 403 });
+      return NextResponse.json(
+        {
+          error: 'Verification required. Please provide the passenger mobile phone number used during checkout to view this ticket.',
+          needsPhoneVerification: true
+        },
+        { status: 403 }
+      );
     }
 
-    // 4. Fetch trip snapshot or live trip details
+    // 6. Fetch trip details for display
     let trip = null;
     if (booking.tripId) {
-      const tripSnap = await get(child(ref(db), `trips/${booking.tripId}`));
+      const tripSnap = await db.ref(`trips/${booking.tripId}`).once('value');
       if (tripSnap.exists()) {
         trip = tripSnap.val();
       }
     }
 
     return NextResponse.json({
-      success: true,
       booking,
       trip
     });
 
   } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'issues' in error) {
+      const zodErr = error as { issues: Array<{ message: string }> };
+      return NextResponse.json(
+        { error: zodErr.issues[0]?.message || 'Invalid input data' },
+        { status: 400 }
+      );
+    }
     console.error("Booking lookup error:", error);
-    const err = error as Error;
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Unable to lookup booking.' }, { status: 500 });
   }
 }

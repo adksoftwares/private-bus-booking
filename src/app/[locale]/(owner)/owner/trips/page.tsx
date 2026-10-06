@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 export default function OwnerTripsPage() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, authFetch } = useAuth();
   const router = useRouter();
   const t = useTranslations('trips');
 
@@ -62,12 +62,11 @@ export default function OwnerTripsPage() {
     const nextStatus = currentStatus === 'cancelled' ? 'scheduled' : 'cancelled';
 
     try {
-      const res = await fetch(`/api/trips/${tripId}`, {
+      const res = await authFetch(`/api/trips/${tripId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: nextStatus,
-          userId: user.uid
+          status: nextStatus
         })
       });
 
@@ -102,12 +101,11 @@ export default function OwnerTripsPage() {
 
     setUpdatingId(tripId);
     try {
-      const res = await fetch(`/api/trips/${tripId}`, {
+      const res = await authFetch(`/api/trips/${tripId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          farePerSeat: newFare,
-          userId: user.uid
+          farePerSeat: newFare
         })
       });
 

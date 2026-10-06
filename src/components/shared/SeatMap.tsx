@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { SeatLayout } from '@/types/trip';
 import { SeatLock } from '@/types/booking';
+import { SEAT_LOCK_DURATION_MS } from '@/lib/constants';
 
 interface SeatMapProps {
   tripId: string;
@@ -123,7 +124,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
         }
 
         // Select -> Atomic transaction to acquire lock
-        const lockExpiry = Date.now() + 5 * 60 * 1000;
+        const lockExpiry = Date.now() + SEAT_LOCK_DURATION_MS;
         const result = await runTransaction(ref(db, `seatLocks/${tripId}/${seatId}`), (current: SeatLock | null) => {
           const transTime = Date.now();
           if (current) {
@@ -359,7 +360,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
       <div className="flex flex-wrap gap-3 sm:gap-4 mt-6 pt-4 border-t border-slate-200 w-full justify-center text-xs font-medium text-slate-600">
         <div className="flex items-center gap-1.5"><div className="w-4 h-4 bg-white border-2 border-slate-300 rounded"></div> Available</div>
         <div className="flex items-center gap-1.5"><div className="w-4 h-4 bg-orange-500 border-2 border-orange-600 rounded"></div> Selected</div>
-        <div className="flex items-center gap-1.5"><div className="w-4 h-4 bg-amber-50 border-2 border-amber-200 rounded"></div> Reserved (5m)</div>
+        <div className="flex items-center gap-1.5"><div className="w-4 h-4 bg-amber-50 border-2 border-amber-200 rounded"></div> Reserved (10m)</div>
         <div className="flex items-center gap-1.5"><div className="w-4 h-4 bg-slate-200 border-2 border-slate-300 rounded opacity-60"></div> Booked</div>
       </div>
 

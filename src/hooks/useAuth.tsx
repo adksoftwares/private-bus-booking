@@ -14,6 +14,8 @@ interface AuthContextType {
   isStaff: boolean;
   isOwner: boolean;
   refreshRole: () => Promise<void>;
+  getIdToken: () => Promise<string | null>;
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -23,7 +25,9 @@ const AuthContext = createContext<AuthContextType>({
   isAdmin: false,
   isStaff: false,
   isOwner: false,
-  refreshRole: async () => {}
+  refreshRole: async () => {},
+  getIdToken: async () => null,
+  authFetch: async (input, init) => fetch(input, init)
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -72,6 +76,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRole(resolvedRole);
   };
 
+  const getIdToken = async (): Promise<string | null> => {
+    if (!user) return null;
+    try {
+      return await user.getIdToken();
+    } catch (err) {
+      console.error("Failed to get ID token:", err);
+      return null;
+    }
+  };
+
+  const authFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const token = await getIdToken();
+    const headers = new Headers(init?.headers);
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    return fetch(input, {
+      ...init,
+      headers
+    });
+  };
+
   useEffect(() => {
     const auth = getAuth(app);
 
@@ -95,7 +121,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isOwner = role === 'Owner';
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, isAdmin, isStaff, isOwner, refreshRole }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        role,
+        loading,
+        isAdmin,
+        isStaff,
+        isOwner,
+        refreshRole,
+        getIdToken,
+        authFetch
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

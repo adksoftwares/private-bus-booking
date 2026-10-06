@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { ref, get, update, child } from 'firebase/database';
-import { getServerDatabase } from '@/lib/serverFirebase';
+import { getAdminDatabase } from '@/lib/serverFirebase';
+import { requireAuth } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
+import { linkAccountSchema, formatZodError } from '@/lib/validation/schemas';
 import { Booking } from '@/types/booking';
 
 function normalizePhone(p: string): string {
@@ -14,41 +16,49 @@ function normalizePhone(p: string): string {
 
 export async function POST(req: Request) {
   try {
+    // 1. Rate limiting
+    await enforceRateLimit(req, 'link_account', 10, 60);
+
+    // 2. Server-verified Authentication (immune to client-supplied userId spoofing)
+    const authenticatedUser = await requireAuth(req);
+    const userId = authenticatedUser.uid;
+
+    // 3. Validate input payload
     const body = await req.json();
-    const { reference, userId, accessToken, phone } = body;
-
-    if (!reference || typeof reference !== 'string') {
-      return NextResponse.json({ error: 'Valid booking reference or ID is required' }, { status: 400 });
+    const parseResult = linkAccountSchema.safeParse(body);
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: formatZodError(parseResult.error) },
+        { status: 400 }
+      );
     }
-    if (!userId || typeof userId !== 'string') {
-      return NextResponse.json({ error: 'Authenticated userId is required' }, { status: 401 });
-    }
 
+    const { reference, accessToken, phone } = parseResult.data;
     const cleanRef = reference.trim();
-    const db = getServerDatabase();
+    const db = getAdminDatabase();
 
-    // 1. Resolve Order ID from Reference
+    // 4. Resolve Order ID from Reference Index
     let orderId = cleanRef;
     if (cleanRef.toUpperCase().startsWith('SLB-')) {
-      const refSnap = await get(child(ref(db), `indexes/bookingReferences/${cleanRef.toUpperCase()}`));
+      const refSnap = await db.ref(`indexes/bookingReferences/${cleanRef.toUpperCase()}`).once('value');
       if (refSnap.exists()) {
         orderId = refSnap.val();
       }
     }
 
-    // 2. Fetch booking
-    let bookingSnap = await get(child(ref(db), `bookings/${orderId}`));
+    // 5. Fetch booking record
+    let bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
     if (!bookingSnap.exists()) {
-      bookingSnap = await get(child(ref(db), `tickets/${orderId}`));
+      bookingSnap = await db.ref(`tickets/${orderId}`).once('value');
     }
 
     if (!bookingSnap.exists()) {
       return NextResponse.json({ error: 'Booking not found. Please verify the booking reference.' }, { status: 404 });
     }
 
-    const booking = bookingSnap.val() as Booking;
+    const booking: Booking = bookingSnap.val();
 
-    // 3. Verify that booking is not already claimed by a different account
+    // 6. Verify that booking is not already claimed by a different account
     if (booking.userId) {
       if (booking.userId === userId) {
         return NextResponse.json({
@@ -63,13 +73,12 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Fetch the authenticated user's profile to verify matching identity
-    const userSnap = await get(child(ref(db), `users/${userId}`));
+    // 7. Verify ownership proof (AccessToken OR Phone OR Email match)
+    const userSnap = await db.ref(`users/${userId}`).once('value');
     const userData = userSnap.exists() ? userSnap.val() : {};
-    const userPhone = userData.phone || userData.mobile || phone || '';
-    const userEmail = userData.email || '';
+    const userPhone = userData.phone || userData.mobile || phone || authenticatedUser.phone || '';
+    const userEmail = userData.email || authenticatedUser.email || '';
 
-    // Verify ownership proof
     let isVerified = false;
 
     // Check token match
@@ -99,7 +108,7 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
-    // 5. Update booking and index under user's account
+    // 8. Update booking and index under user's account
     const now = Date.now();
     const updates: Record<string, unknown> = {};
 
@@ -114,7 +123,7 @@ export async function POST(req: Request) {
 
     updates[`indexes/userBookings/${userId}/${orderId}`] = true;
 
-    await update(ref(db), updates);
+    await db.ref().update(updates);
 
     const updatedBooking: Booking = {
       ...booking,
@@ -130,8 +139,8 @@ export async function POST(req: Request) {
     });
 
   } catch (error: unknown) {
-    console.error("Link account error:", error);
-    const err = error as Error;
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    const err = error as { statusCode?: number; message?: string };
+    const status = err.statusCode || 500;
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status });
   }
 }

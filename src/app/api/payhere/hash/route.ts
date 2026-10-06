@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { ref, get, child } from 'firebase/database';
-import { getServerDatabase } from '@/lib/serverFirebase';
+import { getAdminDatabase } from '@/lib/serverFirebase';
+import { enforceRateLimit } from '@/lib/rate-limiter';
+import { DEFAULT_CURRENCY } from '@/lib/constants';
 
 export async function POST(req: Request) {
   try {
+    // 1. Rate limiting
+    await enforceRateLimit(req, 'payhere_hash', 30, 60);
+
     const body = await req.json();
     const { orderId } = body;
 
@@ -12,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Valid orderId is required' }, { status: 400 });
     }
 
-    // 1. Validate environment configuration (no insecure fallback secrets)
+    // 2. Validate environment configuration
     const merchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || process.env.PAYHERE_MERCHANT_ID;
     const secret = process.env.PAYHERE_SECRET;
 
@@ -24,9 +28,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Fetch authoritative booking from database
-    const db = getServerDatabase();
-    const bookingSnap = await get(child(ref(db), `bookings/${orderId}`));
+    // 3. Fetch authoritative booking from database using Admin SDK
+    const db = getAdminDatabase();
+    const bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
+
     if (!bookingSnap.exists()) {
       return NextResponse.json({ error: 'Booking not found for orderId' }, { status: 404 });
     }
@@ -39,16 +44,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Authoritative amount from database record
+    // 4. Authoritative amount derived directly from server record
     const amount = Number(booking.totalAmount);
     if (!amount || isNaN(amount) || amount <= 0) {
-      return NextResponse.json({ error: 'Invalid booking amount' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid booking ticket amount' }, { status: 400 });
     }
 
-    const currency = "LKR";
+    const currency = DEFAULT_CURRENCY; // LKR
     const formattedAmount = amount.toFixed(2);
 
-    // 4. Official PayHere Hash generation logic:
+    // 5. Official PayHere MD5 Hash generation:
     // md5sig = strtoupper(md5(merchant_id + order_id + amount_formatted + currency + strtoupper(md5(payhere_secret))))
     const hashedSecret = crypto.createHash('md5').update(secret).digest('hex').toUpperCase();
     const hashString = `${merchantId}${orderId}${formattedAmount}${currency}${hashedSecret}`;
@@ -58,12 +63,12 @@ export async function POST(req: Request) {
       hash: finalHash,
       merchantId,
       formattedAmount,
-      currency,
-      orderId
+      currency
     });
+
   } catch (error: unknown) {
-    console.error("PayHere hash generation error:", error);
-    const err = error as Error;
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    const err = error as { statusCode?: number; message?: string };
+    const status = err.statusCode || 500;
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status });
   }
 }

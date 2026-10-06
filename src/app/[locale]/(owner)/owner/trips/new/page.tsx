@@ -22,7 +22,7 @@ import CityAutocomplete from '@/components/shared/CityAutocomplete';
 import { useSearchParams } from 'next/navigation';
 
 export default function NewTripPage() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, authFetch } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryBusId = searchParams.get('busId');
@@ -162,7 +162,7 @@ export default function NewTripPage() {
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/trips', {
+      const res = await authFetch('/api/trips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -174,8 +174,7 @@ export default function NewTripPage() {
           departureTime,
           arrivalTime,
           duration,
-          farePerSeat: Number(farePerSeat),
-          userId: user.uid
+          farePerSeat: Number(farePerSeat)
         })
       });
 

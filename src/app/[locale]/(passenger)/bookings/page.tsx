@@ -10,7 +10,7 @@ import { Search, Link as LinkIcon, KeyRound, LogIn } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 export default function PassengerBookingsPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, authFetch } = useAuth();
   const router = useRouter();
   const t = useTranslations('myBookings');
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -100,12 +100,11 @@ export default function PassengerBookingsPage() {
     setLinking(true);
 
     try {
-      const res = await fetch('/api/bookings/link-account', {
+      const res = await authFetch('/api/bookings/link-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reference: linkRefInput.trim(),
-          userId: user.uid,
           phone: linkPhoneInput.trim()
         })
       });
@@ -140,12 +139,11 @@ export default function PassengerBookingsPage() {
     setNotice(null);
 
     try {
-      const response = await fetch('/api/bookings/cancel', {
+      const response = await authFetch('/api/bookings/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bookingId: booking.id,
-          userId: user.uid
+          bookingId: booking.id
         })
       });
 

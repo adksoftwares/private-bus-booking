@@ -1,44 +1,112 @@
 import { NextResponse } from 'next/server';
-import { ref, get, update, child } from 'firebase/database';
-import { getServerDatabase } from '@/lib/serverFirebase';
+import { getAdminDatabase } from '@/lib/serverFirebase';
+import { requireStaffOrAdmin } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
+import { verifyTicketSchema, formatZodError } from '@/lib/validation/schemas';
+import { atomicBoardTicket } from '@/lib/services/booking-service';
+import { Booking } from '@/types/booking';
 
 export async function POST(req: Request) {
   try {
+    // 1. Rate limiting
+    await enforceRateLimit(req, 'verify_ticket', 60, 60);
+
+    // 2. Server-verified Authentication (Bearer token verified, no client staffUid spoofing)
+    const staffUser = await requireStaffOrAdmin(req);
+
+    // 3. Validate request payload
     const body = await req.json();
-    const { bookingId, staffUid, action = 'lookup' } = body;
-
-    if (!bookingId || typeof bookingId !== 'string') {
-      return NextResponse.json({ error: 'Valid bookingId is required' }, { status: 400 });
+    const parseResult = verifyTicketSchema.safeParse(body);
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: formatZodError(parseResult.error) },
+        { status: 400 }
+      );
     }
-    if (!staffUid || typeof staffUid !== 'string') {
-      return NextResponse.json({ error: 'Authenticated staff ID is required' }, { status: 401 });
-    }
 
-    const db = getServerDatabase();
+    const { bookingId: rawId, action } = parseResult.data;
+    const cleanId = rawId.trim();
+    const db = getAdminDatabase();
 
-    // 1. Verify staff authorization
-    const userSnap = await get(child(ref(db), `users/${staffUid}`));
-    const ownerSnap = await get(child(ref(db), `owners/${staffUid}`));
-    
-    let isAuthorized = false;
-    if (userSnap.exists()) {
-      const role = userSnap.val().role;
-      if (role === 'Admin' || role === 'Conductor' || role === 'Owner') {
-        isAuthorized = true;
+    // 4. Resolve Order ID from Reference if needed (e.g. "SLB-AB12CD")
+    let orderId = cleanId;
+    if (cleanId.toUpperCase().startsWith('SLB-')) {
+      const refSnap = await db.ref(`indexes/bookingReferences/${cleanId.toUpperCase()}`).once('value');
+      if (refSnap.exists()) {
+        orderId = refSnap.val();
       }
     }
-    if (ownerSnap.exists()) {
-      isAuthorized = true;
+
+    // 5. If action is 'board', execute atomic single-use boarding transaction
+    if (action === 'board') {
+      const boardResult = await atomicBoardTicket(orderId, staffUser);
+
+      if (!boardResult.success) {
+        if (boardResult.reason === 'NOT_FOUND') {
+          return NextResponse.json({
+            valid: false,
+            reason: 'NOT_FOUND',
+            message: 'Invalid Ticket — No booking record found for this reference.'
+          }, { status: 404 });
+        }
+
+        if (boardResult.reason === 'CANCELLED') {
+          return NextResponse.json({
+            valid: false,
+            reason: 'CANCELLED',
+            message: 'Boarding Rejected — This booking was CANCELLED.'
+          }, { status: 400 });
+        }
+
+        if (boardResult.reason === 'UNPAID') {
+          return NextResponse.json({
+            valid: false,
+            reason: 'UNPAID',
+            message: 'Boarding Rejected — Ticket payment is not confirmed.'
+          }, { status: 400 });
+        }
+
+        if (boardResult.reason === 'ALREADY_BOARDED') {
+          const boardedTime = boardResult.boardedAt ? new Date(boardResult.boardedAt).toLocaleTimeString() : 'Earlier';
+          return NextResponse.json({
+            valid: false,
+            reason: 'ALREADY_BOARDED',
+            message: `Ticket Already Used — This passenger was already boarded at ${boardedTime}. Duplicate boarding is rejected!`,
+            boardedAt: boardResult.boardedAt,
+            boardedBy: boardResult.boardedBy
+          }, { status: 409 });
+        }
+
+        return NextResponse.json({
+          valid: false,
+          reason: 'TRANSACTION_FAILED',
+          message: 'Boarding transaction failed. Please retry.'
+        }, { status: 500 });
+      }
+
+      // Fetch trip details for display
+      let trip = null;
+      if (boardResult.booking?.tripId) {
+        const tripSnap = await db.ref(`trips/${boardResult.booking.tripId}`).once('value');
+        if (tripSnap.exists()) {
+          trip = tripSnap.val();
+        }
+      }
+
+      return NextResponse.json({
+        valid: true,
+        canBoard: false,
+        boarded: true,
+        message: 'Boarding Confirmed — Passenger marked as boarded successfully.',
+        booking: boardResult.booking,
+        trip
+      });
     }
 
-    if (!isAuthorized) {
-      return NextResponse.json({ error: 'Access denied. Authorized staff only.' }, { status: 403 });
-    }
-
-    // 2. Fetch booking
-    let bookingSnap = await get(child(ref(db), `bookings/${bookingId}`));
+    // 6. Action is 'lookup' (read-only verification check)
+    let bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
     if (!bookingSnap.exists()) {
-      bookingSnap = await get(child(ref(db), `tickets/${bookingId}`));
+      bookingSnap = await db.ref(`tickets/${orderId}`).once('value');
     }
 
     if (!bookingSnap.exists()) {
@@ -49,18 +117,18 @@ export async function POST(req: Request) {
       }, { status: 404 });
     }
 
-    const booking = bookingSnap.val();
+    const booking: Booking = bookingSnap.val();
 
     // Fetch trip details for display
     let trip = null;
     if (booking.tripId) {
-      const tripSnap = await get(child(ref(db), `trips/${booking.tripId}`));
+      const tripSnap = await db.ref(`trips/${booking.tripId}`).once('value');
       if (tripSnap.exists()) {
         trip = tripSnap.val();
       }
     }
 
-    // 3. Status checks
+    // Check status
     if (booking.status === 'cancelled') {
       return NextResponse.json({
         valid: false,
@@ -81,7 +149,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. Check for single-use boarding duplication
     if (booking.boarded || booking.status === 'boarded') {
       const boardedTime = booking.boardedAt ? new Date(booking.boardedAt).toLocaleTimeString() : 'Earlier';
       return NextResponse.json({
@@ -94,49 +161,19 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. If action is 'board', mark as boarded
-    if (action === 'board') {
-      const now = Date.now();
-      const updates: Record<string, unknown> = {};
-      updates[`bookings/${bookingId}/boarded`] = true;
-      updates[`bookings/${bookingId}/boardedAt`] = now;
-      updates[`bookings/${bookingId}/boardedBy`] = staffUid;
-      updates[`bookings/${bookingId}/status`] = 'boarded';
-
-      updates[`tickets/${bookingId}/boarded`] = true;
-      updates[`tickets/${bookingId}/boardedAt`] = now;
-      updates[`tickets/${bookingId}/boardedBy`] = staffUid;
-      updates[`tickets/${bookingId}/status`] = 'boarded';
-
-      await update(ref(db), updates);
-
-      return NextResponse.json({
-        valid: true,
-        boarded: true,
-        message: 'Passenger Boarded Successfully! Single-use boarding has been recorded.',
-        booking: {
-          ...booking,
-          boarded: true,
-          boardedAt: now,
-          boardedBy: staffUid,
-          status: 'boarded'
-        },
-        trip
-      });
-    }
-
-    // Default 'lookup' response
+    // Valid ticket ready for boarding
     return NextResponse.json({
       valid: true,
       canBoard: true,
-      message: 'Valid Confirmed Ticket — Ready for Boarding.',
+      boarded: false,
+      message: 'Valid Ticket — Passenger is cleared for boarding.',
       booking,
       trip
     });
 
   } catch (error: unknown) {
-    console.error("Ticket verification error:", error);
-    const err = error as Error;
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    const err = error as { statusCode?: number; message?: string };
+    const status = err.statusCode || 500;
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status });
   }
 }

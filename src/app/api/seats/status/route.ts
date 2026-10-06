@@ -6,14 +6,15 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const tripId = searchParams.get('tripId');
-    const sessionId = searchParams.get('sessionId') || searchParams.get('userId');
+    // Never trust caller-supplied sessionId/userId for ownership decisions.
+    // Only a server-verified authenticated user may be marked as the owner of a lock.
 
     if (!tripId) {
       return NextResponse.json({ error: 'tripId is required' }, { status: 400 });
     }
 
     const user = await getAuthenticatedUser(req);
-    const callerId = user?.uid || sessionId || null;
+    const callerId = user?.uid || null;
 
     const supabase = getSupabaseAdminClient();
     const nowIso = new Date().toISOString();

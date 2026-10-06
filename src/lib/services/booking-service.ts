@@ -424,22 +424,18 @@ export async function lookupBookingByReference(
   } else if (authenticatedUserId && booking.userId && authenticatedUserId === booking.userId) {
     isAuthorized = true;
     isTokenOrAccountAuth = true;
-  } else if (providedPhone) {
-    const normProvided = normalizeSriLankanPhone(providedPhone);
-    const normPassenger = normalizeSriLankanPhone(booking.passengerPhone || '');
-    if (normProvided && normPassenger && normProvided === normPassenger) {
-      isAuthorized = true;
-    }
   }
 
+  // A phone number is not an authentication factor. It is intentionally NOT
+  // accepted as a standalone authorization credential for booking disclosure.
   if (!isAuthorized) {
     throw new HttpError(
       403,
-      'Access verification required. Please verify with the passenger phone number or access token.'
+      'Access verification required. Please use your booking access token or signed-in account.'
     );
   }
 
-  // Prevent token leakage: If verified ONLY via phone, never expose accessToken in the response
+  // This response is only returned after cryptographic token or account authorization.
   if (!isTokenOrAccountAuth) {
     booking.accessToken = '';
   }

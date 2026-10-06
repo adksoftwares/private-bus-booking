@@ -26,18 +26,35 @@ export interface AuthenticatedUser {
  */
 export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedUser | null> {
   try {
+    let user = null;
     const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return null;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7).trim();
+      if (token) {
+        const supabase = getSupabaseAdminClient();
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data?.user) {
+          user = data.user;
+        }
+      }
     }
 
-    const token = authHeader.substring(7).trim();
-    if (!token) return null;
+    // Fallback: Check SSR cookies if Authorization header was not present or valid
+    if (!user) {
+      try {
+        const { createClient } = await import('@/lib/supabase/server');
+        const supabaseServer = await createClient();
+        const { data, error } = await supabaseServer.auth.getUser();
+        if (!error && data?.user) {
+          user = data.user;
+        }
+      } catch {
+        // SSR cookies unavailable or running in context without cookies
+      }
+    }
 
-    const supabase = getSupabaseAdminClient();
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
+    if (!user) {
       return null;
     }
 
@@ -46,9 +63,11 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
     const phone = user.phone || (user.user_metadata?.phone as string | undefined);
     const name = (user.user_metadata?.name || user.user_metadata?.displayName || user.user_metadata?.full_name) as string | undefined;
 
+    const supabaseAdmin = getSupabaseAdminClient();
+
     // Check profiles table for role
     let role: UserRole = 'Passenger';
-    const { data: profile } = await supabase
+    const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('role, name, phone')
       .eq('id', uid)
@@ -58,7 +77,7 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
       role = profile.role as UserRole;
     } else {
       // Check owners table
-      const { data: owner } = await supabase
+      const { data: owner } = await supabaseAdmin
         .from('owners')
         .select('id')
         .eq('id', uid)
@@ -166,3 +185,71 @@ export async function requireTripOwnership(req: Request, tripId: string): Promis
 
   return user;
 }
+
+/**
+ * Requires that the authenticated user is an Admin, the trip owner, or an assigned conductor/driver for the trip.
+ */
+export async function requireTripStaffAssignment(req: Request, tripId: string): Promise<AuthenticatedUser> {
+  const user = await requireAuth(req);
+  if (user.isAdmin) return user;
+
+  const supabase = getSupabaseAdminClient();
+  const { data: trip, error: tripError } = await supabase
+    .from('trips')
+    .select('owner_id')
+    .eq('id', tripId)
+    .maybeSingle();
+
+  if (tripError || !trip) {
+    throw new HttpError(404, 'Trip schedule not found.');
+  }
+
+  // Bus owner has authoritative access
+  if (trip.owner_id === user.uid) {
+    return user;
+  }
+
+  // Check staff_trip_assignments
+  const { data: assignment, error: assignError } = await supabase
+    .from('staff_trip_assignments')
+    .select('id, assigned_role')
+    .eq('trip_id', tripId)
+    .eq('staff_id', user.uid)
+    .maybeSingle();
+
+  if (assignError || !assignment) {
+    throw new HttpError(403, 'Access denied: You are not assigned to this trip schedule.');
+  }
+
+  return user;
+}
+
+/**
+ * Server-side security audit logging
+ */
+export async function logAudit(
+  action: string,
+  resourceType: string,
+  resourceId: string | null,
+  metadata: Record<string, unknown> = {},
+  actorId?: string | null,
+  actorRole?: string | null,
+  ipAddress?: string | null
+): Promise<void> {
+  try {
+    const supabase = getSupabaseAdminClient();
+    await supabase.from('audit_logs').insert([{
+      action,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      metadata: metadata as unknown as import('@/types/database').Json,
+      actor_id: actorId || null,
+      actor_role: actorRole || null,
+      ip_address: ipAddress || null,
+      created_at: new Date().toISOString()
+    }]);
+  } catch (err) {
+    console.error('Failed to record security audit log:', err);
+  }
+}
+

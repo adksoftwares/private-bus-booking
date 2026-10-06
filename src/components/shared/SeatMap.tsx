@@ -49,7 +49,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
   const fetchSeatStatuses = useCallback(async () => {
     if (!tripId) return;
     try {
-      const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}`);
+      const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}&sessionId=${encodeURIComponent(effectiveUserId)}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.statuses) {
@@ -60,7 +60,8 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
         setSelectedSeats(prev => {
           const filtered = prev.filter(s => {
             const sInfo = statuses[s];
-            return sInfo && sInfo.status === 'locked' && sInfo.userId === effectiveUserId;
+            const isMine = Boolean(sInfo && (sInfo.isMine || sInfo.userId === effectiveUserId));
+            return sInfo && sInfo.status === 'locked' && isMine;
           });
           if (filtered.length !== prev.length && onSeatSelectRef.current) {
             const cb = onSeatSelectRef.current;
@@ -80,7 +81,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     const loadInitialStatuses = async () => {
       if (!tripId) return;
       try {
-        const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}`);
+        const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}&sessionId=${encodeURIComponent(effectiveUserId)}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!isCancelled && data.statuses) {
@@ -119,7 +120,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
       channel.unsubscribe();
       clearInterval(pollInterval);
     };
-  }, [tripId, fetchSeatStatuses]);
+  }, [tripId, fetchSeatStatuses, effectiveUserId]);
 
   const handleSeatClick = async (seatId: string) => {
     if (readOnly || !effectiveUserId || processingSeat) return;
@@ -272,8 +273,8 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           const seatType = getSeatPosition(c, isLastRow);
           const statusInfo = seatStatuses[seatId];
           const isBooked = statusInfo?.status === 'booked';
-          const isLockedByMe = statusInfo?.status === 'locked' && statusInfo.userId === effectiveUserId;
-          const isLockedByOther = statusInfo?.status === 'locked' && statusInfo.userId !== effectiveUserId && Boolean(statusInfo.expiresAt && statusInfo.expiresAt > now);
+          const isLockedByMe = statusInfo?.status === 'locked' && Boolean(statusInfo.isMine || statusInfo.userId === effectiveUserId);
+          const isLockedByOther = statusInfo?.status === 'locked' && !statusInfo.isMine && statusInfo.userId !== effectiveUserId && Boolean(statusInfo.expiresAt && statusInfo.expiresAt > now);
           const isSelected = selectedSeats.includes(seatId);
           const isProcessing = processingSeat === seatId;
           

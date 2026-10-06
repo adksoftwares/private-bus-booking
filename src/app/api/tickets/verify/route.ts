@@ -42,11 +42,38 @@ export async function POST(req: Request) {
       }, { status: 404 });
     }
 
+    // 4b. Enforce Conductor Trip Assignment Isolation
+    // Only Admin, the bus owner, or an assigned staff member can verify/board passengers
+    if (!staffUser.isAdmin && booking.owner_id !== staffUser.uid) {
+      const { data: assignment } = await supabase
+        .from('staff_trip_assignments')
+        .select('id')
+        .eq('trip_id', booking.trip_id)
+        .eq('staff_id', staffUser.uid)
+        .maybeSingle();
+
+      if (!assignment) {
+        return NextResponse.json({
+          valid: false,
+          reason: 'UNAUTHORIZED_STAFF',
+          message: 'Access Denied — You are not assigned as conductor/staff for this trip schedule.'
+        }, { status: 403 });
+      }
+    }
+
     // 5. If action is 'board', execute atomic single-use boarding transaction
     if (action === 'board') {
       const boardResult = await atomicBoardTicket(booking.id, staffUser);
 
       if (!boardResult.success) {
+        if (boardResult.reason === 'UNAUTHORIZED_STAFF') {
+          return NextResponse.json({
+            valid: false,
+            reason: 'UNAUTHORIZED_STAFF',
+            message: 'Access Denied — You are not assigned as conductor/staff for this trip schedule.'
+          }, { status: 403 });
+        }
+
         if (boardResult.reason === 'NOT_FOUND') {
           return NextResponse.json({
             valid: false,

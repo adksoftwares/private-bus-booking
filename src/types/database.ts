@@ -500,6 +500,42 @@ export interface Database {
         };
         Relationships: [];
       };
+      audit_logs: {
+        Row: {
+          id: string;
+          actor_id: string | null;
+          actor_role: string | null;
+          action: string;
+          resource_type: string;
+          resource_id: string | null;
+          metadata: Json;
+          ip_address: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          actor_id?: string | null;
+          actor_role?: string | null;
+          action: string;
+          resource_type: string;
+          resource_id?: string | null;
+          metadata?: Json;
+          ip_address?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          actor_id?: string | null;
+          actor_role?: string | null;
+          action?: string;
+          resource_type?: string;
+          resource_id?: string | null;
+          metadata?: Json;
+          ip_address?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -528,7 +564,18 @@ export interface Database {
           p_booking_id: string;
           p_user_id: string;
         };
-        Returns: boolean;
+        Returns: Json;
+      };
+      process_payment_webhook_atomic: {
+        Args: {
+          p_order_id: string;
+          p_payment_id: string;
+          p_amount: number;
+          p_currency: string;
+          p_status_code: string;
+          p_raw_payload?: Json;
+        };
+        Returns: Json;
       };
       board_passenger_atomic: {
         Args: {
@@ -536,6 +583,27 @@ export interface Database {
           p_conductor_id: string;
         };
         Returns: Json;
+      };
+      cancel_booking_atomic: {
+        Args: {
+          p_booking_id: string;
+          p_caller_id?: string | null;
+          p_access_token?: string | null;
+          p_is_admin?: boolean;
+        };
+        Returns: Json;
+      };
+      get_trip_seat_availability: {
+        Args: {
+          p_trip_id: string;
+          p_caller_user_id?: string;
+        };
+        Returns: Array<{
+          seat_id: string;
+          status: string;
+          is_mine: boolean;
+          expires_at: string | null;
+        }>;
       };
     };
   };

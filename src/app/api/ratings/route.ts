@@ -112,10 +112,18 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'You can only rate trips booked under your account.' }, { status: 403 });
       }
     } else {
-      // For guest, check accessToken if provided in body
-      if (body.accessToken && booking.access_token && body.accessToken !== booking.access_token) {
-        return NextResponse.json({ error: 'Invalid access token for this booking.' }, { status: 403 });
+      // For guest, accessToken is mandatory and must match to prevent unverified review spoofing
+      if (!body.accessToken || !booking.access_token || body.accessToken !== booking.access_token) {
+        return NextResponse.json({ error: 'Valid booking access token is required to submit a verified review.' }, { status: 403 });
       }
+    }
+
+    // Verify the booking is actually for this specific bus
+    const tripSnapshot = booking.trip_snapshot as Record<string, unknown> | null;
+    const busSnapshot = tripSnapshot?.busSnapshot as Record<string, unknown> | null;
+    const tripBusId = (tripSnapshot?.busId as string) || (busSnapshot?.id as string) || '';
+    if (tripBusId && tripBusId !== busId) {
+      return NextResponse.json({ error: 'This booking was for a different bus.' }, { status: 400 });
     }
 
     // 5. Check if this booking was already reviewed

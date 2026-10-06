@@ -63,4 +63,5 @@ export interface SeatLock {
   status: 'locked' | 'booked';
   expiresAt?: number;
   bookingId?: string;
+  isMine?: boolean;
 }

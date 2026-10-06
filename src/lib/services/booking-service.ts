@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
-import { SEAT_LOCK_DURATION_MS, DEFAULT_CURRENCY } from '@/lib/constants';
+import { SEAT_LOCK_DURATION_MS, DEFAULT_CURRENCY, MAX_SEATS_PER_BOOKING } from '@/lib/constants';
 import { Booking, BookingType } from '@/types/booking';
 import { Trip } from '@/types/trip';
-import { AuthenticatedUser, HttpError } from '@/lib/auth-server';
+import { AuthenticatedUser, HttpError, logAudit } from '@/lib/auth-server';
 import { Json } from '@/types/database';
 
 export interface CreateBookingParams {
@@ -98,6 +98,14 @@ export async function atomicLockSeats(
   effectiveUserId: string,
   orderId: string
 ): Promise<{ success: boolean; conflictingSeat?: string }> {
+  if (!seatIds || seatIds.length === 0) {
+    return { success: false };
+  }
+
+  if (seatIds.length > MAX_SEATS_PER_BOOKING) {
+    return { success: false, conflictingSeat: seatIds[MAX_SEATS_PER_BOOKING] };
+  }
+
   const supabase = getSupabaseAdminClient();
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + SEAT_LOCK_DURATION_MS).toISOString();
@@ -181,6 +189,14 @@ export async function createPendingBooking(params: CreateBookingParams) {
   const { tripId, selectedSeats, passengerDetails, authenticatedUser, guestSessionId } = params;
   const supabase = getSupabaseAdminClient();
 
+  if (!selectedSeats || selectedSeats.length === 0) {
+    throw new HttpError(400, 'Please select at least one seat to proceed.');
+  }
+
+  if (selectedSeats.length > MAX_SEATS_PER_BOOKING) {
+    throw new HttpError(400, `You cannot reserve more than ${MAX_SEATS_PER_BOOKING} seats per transaction.`);
+  }
+
   // 1. Fetch trip authoritatively from Supabase
   const { data: tripData, error: tripError } = await supabase
     .from('trips')
@@ -217,6 +233,10 @@ export async function createPendingBooking(params: CreateBookingParams) {
 
   // 2. Authoritative Fare Calculation
   const individualFare = Number(trip.farePerSeat || trip.baseFare || 0);
+  if (individualFare <= 0) {
+    throw new HttpError(400, 'Invalid fare configuration for this trip schedule.');
+  }
+
   const ticketAmount = selectedSeats.length * individualFare;
   const commissionRate = 0.10;
   const platformCommission = Math.round(ticketAmount * commissionRate * 100) / 100;
@@ -289,8 +309,24 @@ export async function createPendingBooking(params: CreateBookingParams) {
 
   if (insertBookingError) {
     console.error("Failed to insert pending booking:", insertBookingError);
+    // Cleanup temporary seat locks to prevent deadlocks
+    await supabase
+      .from('seat_locks')
+      .delete()
+      .eq('trip_id', tripId)
+      .eq('booking_id', orderId);
     throw new HttpError(500, 'Failed to create reservation record.');
   }
+
+  // Record audit log
+  await logAudit(
+    'PENDING_BOOKING_CREATED',
+    'booking',
+    orderId,
+    { tripId, seats: selectedSeats, amount: ticketAmount, bookingType },
+    authenticatedUser?.uid || null,
+    authenticatedUser?.role || 'Guest'
+  );
 
   // 6. Generate PayHere Checkout Signature
   const merchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || '';
@@ -374,11 +410,14 @@ export async function lookupBookingByReference(
 
   // Authorization Check
   let isAuthorized = false;
+  let isTokenOrAccountAuth = false;
 
   if (accessToken && booking.accessToken && accessToken === booking.accessToken) {
     isAuthorized = true;
+    isTokenOrAccountAuth = true;
   } else if (authenticatedUserId && booking.userId && authenticatedUserId === booking.userId) {
     isAuthorized = true;
+    isTokenOrAccountAuth = true;
   } else if (providedPhone) {
     const normProvided = normalizeSriLankanPhone(providedPhone);
     const normPassenger = normalizeSriLankanPhone(booking.passengerPhone || '');
@@ -392,6 +431,11 @@ export async function lookupBookingByReference(
       403,
       'Access verification required. Please verify with the passenger phone number or access token.'
     );
+  }
+
+  // Prevent token leakage: If verified ONLY via phone, never expose accessToken in the response
+  if (!isTokenOrAccountAuth) {
+    booking.accessToken = '';
   }
 
   // Fetch full trip details
@@ -423,6 +467,7 @@ export async function lookupBookingByReference(
 
 /**
  * Links a past guest booking to an authenticated user account.
+ * Requires the cryptographic accessToken to prevent phone-based hijacking.
  */
 export async function linkGuestBookingToAccount(
   reference: string,
@@ -454,20 +499,17 @@ export async function linkGuestBookingToAccount(
     throw new HttpError(403, 'This booking has already been claimed by another registered account.');
   }
 
-  // Verify ownership via access token or passenger phone
-  let verified = false;
-  if (accessToken && booking.access_token && accessToken === booking.access_token) {
-    verified = true;
-  } else if (phone) {
-    const normProvided = normalizeSriLankanPhone(phone);
-    const normPassenger = normalizeSriLankanPhone(booking.passenger_phone || '');
-    if (normProvided && normPassenger && normProvided === normPassenger) {
-      verified = true;
-    }
+  // Cryptographic token verification is mandatory to prevent phone guessing attacks
+  if (!accessToken || !booking.access_token || accessToken !== booking.access_token) {
+    throw new HttpError(403, 'Verification failed. A valid booking access token is required to claim this reservation.');
   }
 
-  if (!verified) {
-    throw new HttpError(403, 'Verification failed. The provided phone number or token did not match this booking.');
+  if (phone) {
+    const normProvided = normalizeSriLankanPhone(phone);
+    const normPassenger = normalizeSriLankanPhone(booking.passenger_phone || '');
+    if (normProvided && normPassenger && normProvided !== normPassenger) {
+      throw new HttpError(403, 'Verification failed. The provided phone number does not match this booking.');
+    }
   }
 
   // Update booking in Supabase
@@ -485,6 +527,15 @@ export async function linkGuestBookingToAccount(
     throw new HttpError(500, 'Database error while linking booking.');
   }
 
+  await logAudit(
+    'GUEST_BOOKING_LINKED',
+    'booking',
+    booking.id,
+    { reference: cleanRef, claimedBy: authenticatedUserId },
+    authenticatedUserId,
+    'Passenger'
+  );
+
   return {
     success: true,
     message: 'Booking successfully linked to your account!',
@@ -494,10 +545,54 @@ export async function linkGuestBookingToAccount(
 
 /**
  * Cancels a booking, computes eligible refunds, and frees up seats atomically.
+ * Requires authenticated account ownership, admin privileges, or cryptographic access token.
  */
-export async function cancelBooking(bookingId: string, authenticatedUser: AuthenticatedUser) {
+export async function cancelBooking(
+  bookingId: string,
+  authenticatedUser: AuthenticatedUser | null,
+  accessToken?: string
+) {
   const supabase = getSupabaseAdminClient();
 
+  // 1. Try PostgreSQL atomic cancellation RPC first
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('cancel_booking_atomic', {
+      p_booking_id: bookingId,
+      p_caller_id: authenticatedUser?.uid || undefined,
+      p_access_token: accessToken || undefined,
+      p_is_admin: authenticatedUser?.isAdmin || false
+    });
+
+    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
+      const res = rpcResult as {
+        success: boolean;
+        reason?: string;
+        message?: string;
+        refund_percentage?: number;
+        refund_amount?: number;
+        refund_id?: string;
+      };
+
+      if (!res.success) {
+        if (res.reason === 'not_found') throw new HttpError(404, 'Booking not found.');
+        if (res.reason === 'unauthorized') throw new HttpError(403, 'You are not authorized to cancel this booking.');
+        if (res.reason === 'already_cancelled') throw new HttpError(400, 'This booking has already been cancelled.');
+        throw new HttpError(400, res.message || 'Cancellation rejected.');
+      }
+
+      return {
+        success: true,
+        refundPercentage: res.refund_percentage ?? 0,
+        refundAmount: res.refund_amount ?? 0,
+        refundId: res.refund_id,
+        message: res.message || 'Booking cancelled successfully.'
+      };
+    }
+  } catch (rpcErr) {
+    if (rpcErr instanceof HttpError) throw rpcErr;
+  }
+
+  // 2. Direct transactional fallback
   const { data: bookingData, error: bookingError } = await supabase
     .from('bookings')
     .select('*')
@@ -508,9 +603,18 @@ export async function cancelBooking(bookingId: string, authenticatedUser: Authen
     throw new HttpError(404, 'Booking not found.');
   }
 
-  // Only the passenger who owns the booking or an Admin can cancel it
-  if (!authenticatedUser.isAdmin && bookingData.user_id !== authenticatedUser.uid) {
-    throw new HttpError(403, 'You are only authorized to cancel your own bookings.');
+  // Strict Authorization: Admin OR registered user who owns booking OR valid guest accessToken
+  let isAuthorized = false;
+  if (authenticatedUser?.isAdmin) {
+    isAuthorized = true;
+  } else if (authenticatedUser?.uid && bookingData.user_id === authenticatedUser.uid) {
+    isAuthorized = true;
+  } else if (accessToken && bookingData.access_token && bookingData.access_token === accessToken) {
+    isAuthorized = true;
+  }
+
+  if (!isAuthorized) {
+    throw new HttpError(403, 'Unauthorized: Valid account ownership or booking access token is required to cancel.');
   }
 
   if (bookingData.status === 'cancelled') {
@@ -537,7 +641,7 @@ export async function cancelBooking(bookingId: string, authenticatedUser: Authen
   const refundAmount = Math.round(((originalTicketAmount * refundPercentage) / 100) * 100) / 100;
   const refundId = `RF-${Date.now()}`;
 
-  // 1. Update booking status
+  // Update booking status
   await supabase
     .from('bookings')
     .update({
@@ -548,13 +652,13 @@ export async function cancelBooking(bookingId: string, authenticatedUser: Authen
     })
     .eq('id', bookingId);
 
-  // 2. Insert refund record
+  // Insert refund record
   await supabase
     .from('refunds')
     .insert([{
       id: refundId,
       booking_id: bookingId,
-      user_id: authenticatedUser.uid,
+      user_id: authenticatedUser?.uid || bookingData.user_id || 'guest',
       original_amount: originalTicketAmount,
       refund_amount: refundAmount,
       refund_percentage: refundPercentage,
@@ -562,7 +666,7 @@ export async function cancelBooking(bookingId: string, authenticatedUser: Authen
       created_at: new Date().toISOString()
     }]);
 
-  // 3. Free up seats
+  // Free up seats
   if (bookingData.seats && Array.isArray(bookingData.seats)) {
     await supabase
       .from('seat_locks')
@@ -571,10 +675,21 @@ export async function cancelBooking(bookingId: string, authenticatedUser: Authen
       .in('seat_id', bookingData.seats);
   }
 
+  // Record audit log
+  await logAudit(
+    'BOOKING_CANCELLED',
+    'booking',
+    bookingId,
+    { refundId, refundAmount, refundPercentage },
+    authenticatedUser?.uid || 'guest',
+    authenticatedUser?.role || 'Guest'
+  );
+
   return {
     success: true,
     refundPercentage,
     refundAmount,
+    refundId,
     message: refundAmount > 0
       ? `Booking cancelled successfully. You are eligible for a ${refundPercentage}% refund (Rs. ${refundAmount.toFixed(2)}).`
       : 'Booking cancelled successfully. No refund is available within 12 hours of departure.'
@@ -582,7 +697,7 @@ export async function cancelBooking(bookingId: string, authenticatedUser: Authen
 }
 
 /**
- * Handles PayHere Server-to-Server webhook with strict signature validation & idempotency.
+ * Handles PayHere Server-to-Server webhook with strict signature validation, currency, amount check & idempotency.
  */
 export async function processPayHereNotification(params: PaymentNotificationParams) {
   const { merchantId, orderId, paymentId, payhereAmount, payhereCurrency, statusCode, md5sig } = params;
@@ -603,9 +718,42 @@ export async function processPayHereNotification(params: PaymentNotificationPara
     throw new HttpError(400, 'Payment signature verification failed.');
   }
 
-  const supabase = getSupabaseAdminClient();
+  if (payhereCurrency !== 'LKR') {
+    throw new HttpError(400, 'Currency mismatch. Only LKR payments are supported.');
+  }
 
-  // Fetch booking
+  const supabase = getSupabaseAdminClient();
+  const parsedAmount = parseFloat(payhereAmount);
+
+  // 1. Try PostgreSQL atomic stored procedure
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('process_payment_webhook_atomic', {
+      p_order_id: orderId,
+      p_payment_id: paymentId,
+      p_amount: parsedAmount,
+      p_currency: payhereCurrency,
+      p_status_code: statusCode,
+      p_raw_payload: params as unknown as Json
+    });
+
+    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
+      const res = rpcResult as { success: boolean; status?: string; message?: string; reason?: string };
+      if (!res.success) {
+        if (res.reason === 'amount_mismatch') {
+          throw new HttpError(400, 'Payment amount mismatch. Potential tampering detected.');
+        }
+        if (res.reason === 'booking_not_found') {
+          throw new HttpError(404, `Booking #${orderId} was not found.`);
+        }
+        return { success: false, message: res.message || 'Payment processing failed', bookingId: orderId, status: res.status || 'failed' };
+      }
+      return { success: true, message: res.message || 'Payment confirmed', bookingId: orderId, status: res.status || 'confirmed' };
+    }
+  } catch (rpcErr) {
+    if (rpcErr instanceof HttpError) throw rpcErr;
+  }
+
+  // 2. Direct transactional fallback
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .select('*')
@@ -618,12 +766,24 @@ export async function processPayHereNotification(params: PaymentNotificationPara
 
   // Idempotency: If already confirmed, don't duplicate processing
   if (booking.status === 'confirmed') {
-    return { success: true, message: 'Booking already confirmed', bookingId: orderId };
+    return { success: true, message: 'Booking already confirmed previously', bookingId: orderId, status: 'confirmed' };
+  }
+
+  // Strict Authoritative Amount Validation
+  if (Math.abs(parsedAmount - Number(booking.total_amount)) >= 0.01) {
+    await logAudit(
+      'PAYMENT_AMOUNT_MISMATCH',
+      'booking',
+      orderId,
+      { expected: booking.total_amount, received: parsedAmount, paymentId },
+      'payhere_webhook',
+      'system'
+    );
+    throw new HttpError(400, 'Payment amount mismatch. Potential tampering detected.');
   }
 
   // Status code 2 = Success in PayHere
   if (statusCode === '2') {
-    // 1. Confirm booking
     await supabase
       .from('bookings')
       .update({
@@ -633,14 +793,13 @@ export async function processPayHereNotification(params: PaymentNotificationPara
       })
       .eq('id', orderId);
 
-    // 2. Insert payment record
     await supabase
       .from('payments')
       .upsert([{
         id: paymentId || `PAY-${orderId}`,
         booking_id: orderId,
         order_id: orderId,
-        amount: parseFloat(payhereAmount),
+        amount: parsedAmount,
         currency: payhereCurrency,
         status: 'completed',
         provider: 'payhere',
@@ -648,7 +807,6 @@ export async function processPayHereNotification(params: PaymentNotificationPara
         updated_at: new Date().toISOString()
       }]);
 
-    // 3. Mark seat locks as permanently 'booked'
     if (booking.seats && Array.isArray(booking.seats)) {
       const bookedRecords = booking.seats.map((seatId: string) => ({
         trip_id: booking.trip_id,
@@ -665,9 +823,17 @@ export async function processPayHereNotification(params: PaymentNotificationPara
         .upsert(bookedRecords, { onConflict: 'trip_id,seat_id' });
     }
 
-    return { success: true, message: 'Payment successfully processed and booking confirmed', bookingId: orderId };
+    await logAudit(
+      'PAYMENT_CONFIRMED',
+      'booking',
+      orderId,
+      { amount: parsedAmount, paymentId },
+      'payhere_webhook',
+      'system'
+    );
+
+    return { success: true, message: 'Payment successfully processed and booking confirmed', bookingId: orderId, status: 'confirmed' };
   } else {
-    // Payment failed or cancelled
     await supabase
       .from('bookings')
       .update({
@@ -676,7 +842,6 @@ export async function processPayHereNotification(params: PaymentNotificationPara
       })
       .eq('id', orderId);
 
-    // Release temporary seat locks
     if (booking.seats && Array.isArray(booking.seats)) {
       await supabase
         .from('seat_locks')
@@ -686,6 +851,15 @@ export async function processPayHereNotification(params: PaymentNotificationPara
         .eq('status', 'locked');
     }
 
+    await logAudit(
+      'PAYMENT_FAILED',
+      'booking',
+      orderId,
+      { statusCode, amount: parsedAmount },
+      'payhere_webhook',
+      'system'
+    );
+
     return { success: false, message: `Payment failed with status code ${statusCode}`, bookingId: orderId, status: 'payment_failed' };
   }
 }
@@ -693,7 +867,7 @@ export async function processPayHereNotification(params: PaymentNotificationPara
 export const confirmBookingPayment = processPayHereNotification;
 
 /**
- * Atomically checks and boards a passenger with anti-duplicate verification.
+ * Atomically checks and boards a passenger with anti-duplicate verification & trip staff authorization.
  */
 export async function atomicBoardTicket(bookingId: string, staffUser: AuthenticatedUser) {
   const supabase = getSupabaseAdminClient();
@@ -730,7 +904,7 @@ export async function atomicBoardTicket(bookingId: string, staffUser: Authentica
       };
     }
   } catch {
-    // Fall back to direct query
+    // Fall back to direct query with assignment check
   }
 
   // Fallback: Direct conditional query
@@ -742,6 +916,24 @@ export async function atomicBoardTicket(bookingId: string, staffUser: Authentica
 
   if (findError || !booking) {
     return { success: false, reason: 'NOT_FOUND', message: 'Booking reference not found.' };
+  }
+
+  // Verify staff authorization for this trip
+  if (!staffUser.isAdmin && booking.owner_id !== staffUser.uid) {
+    const { data: assignment } = await supabase
+      .from('staff_trip_assignments')
+      .select('id')
+      .eq('trip_id', booking.trip_id)
+      .eq('staff_id', staffUser.uid)
+      .maybeSingle();
+
+    if (!assignment) {
+      return {
+        success: false,
+        reason: 'UNAUTHORIZED_STAFF',
+        message: 'Staff member is not assigned to this trip schedule.'
+      };
+    }
   }
 
   if (booking.status === 'cancelled') {
@@ -777,6 +969,15 @@ export async function atomicBoardTicket(bookingId: string, staffUser: Authentica
   if (updateError) {
     return { success: false, reason: 'CONFLICT', message: 'Boarding conflict. Please rescan.' };
   }
+
+  await logAudit(
+    'PASSENGER_BOARDED',
+    'booking',
+    bookingId,
+    { tripId: booking.trip_id, seats: booking.seats },
+    staffUser.uid,
+    'Conductor'
+  );
 
   return {
     success: true,

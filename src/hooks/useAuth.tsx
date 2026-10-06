@@ -1,19 +1,26 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import { ref, get } from 'firebase/database';
-import { app, db } from '@/lib/firebase';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { supabase } from '@/lib/supabase/client';
 import { UserRole } from '@/types/user';
 
+export interface AppUser {
+  uid: string;
+  id: string;
+  email?: string;
+  displayName?: string;
+  phone?: string;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: AppUser | null;
   role: UserRole | null;
   loading: boolean;
   isAdmin: boolean;
   isStaff: boolean;
   isOwner: boolean;
   refreshRole: () => Promise<void>;
+  signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
@@ -26,40 +33,37 @@ const AuthContext = createContext<AuthContextType>({
   isStaff: false,
   isOwner: false,
   refreshRole: async () => {},
+  signOut: async () => {},
   getIdToken: async () => null,
   authFetch: async (input, init) => fetch(input, init)
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const resolveUserRole = async (currentUser: User): Promise<UserRole> => {
+  const resolveUserRole = useCallback(async (userId: string): Promise<UserRole> => {
     try {
-      // 1. Check custom user claims from ID Token
-      const tokenResult = await currentUser.getIdTokenResult();
-      if (tokenResult.claims.role) {
-        const claimRole = tokenResult.claims.role as string;
-        if (claimRole === 'Admin') return 'Admin';
-        if (claimRole === 'Conductor' || claimRole === 'Driver') return 'Conductor';
-        if (claimRole === 'Owner') return 'Owner';
+      // 1. Check profiles table in Supabase
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profile?.role) {
+        return profile.role as UserRole;
       }
 
-      // 2. Check users/{uid} in Realtime Database
-      const userSnap = await get(ref(db, `users/${currentUser.uid}`));
-      if (userSnap.exists()) {
-        const userData = userSnap.val();
-        const rawRole = userData.role;
-        if (rawRole === 'Admin') return 'Admin';
-        if (rawRole === 'Conductor') return 'Conductor';
-        if (rawRole === 'Owner') return 'Owner';
-        if (rawRole === 'Passenger' || rawRole === 'USER') return 'Passenger';
-      }
+      // 2. Check owners table
+      const { data: owner } = await supabase
+        .from('owners')
+        .select('id')
+        .eq('id', userId)
+        .maybeSingle();
 
-      // 3. Check owners/{uid} in Realtime Database
-      const ownerSnap = await get(ref(db, `owners/${currentUser.uid}`));
-      if (ownerSnap.exists()) {
+      if (owner) {
         return 'Owner';
       }
 
@@ -68,20 +72,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("Failed to resolve user role:", err);
       return 'Passenger';
     }
-  };
+  }, []);
 
   const refreshRole = async () => {
     if (!user) return;
-    const resolvedRole = await resolveUserRole(user);
+    const resolvedRole = await resolveUserRole(user.uid);
     setRole(resolvedRole);
   };
 
   const getIdToken = async (): Promise<string | null> => {
-    if (!user) return null;
     try {
-      return await user.getIdToken();
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token || null;
     } catch (err) {
-      console.error("Failed to get ID token:", err);
+      console.error("Failed to get Supabase session token:", err);
       return null;
     }
   };
@@ -99,21 +103,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const auth = getAuth(app);
+    let isMounted = true;
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        const resolvedRole = await resolveUserRole(currentUser);
-        setRole(resolvedRole);
+    // 1. Initial session load
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isMounted) return;
+
+      if (session?.user) {
+        const u = session.user;
+        const appUser: AppUser = {
+          uid: u.id,
+          id: u.id,
+          email: u.email || undefined,
+          displayName: (u.user_metadata?.name || u.user_metadata?.displayName || u.user_metadata?.full_name) as string | undefined,
+          phone: u.phone || (u.user_metadata?.phone as string | undefined)
+        };
+        setUser(appUser);
+        const resolvedRole = await resolveUserRole(u.id);
+        if (isMounted) setRole(resolvedRole);
       } else {
         setUser(null);
         setRole(null);
       }
-      setLoading(false);
+      if (isMounted) setLoading(false);
+    }).catch(err => {
+      console.error("Error getting Supabase session:", err);
+      if (isMounted) setLoading(false);
     });
 
-    return () => unsubscribe();
+    // 2. Real-time auth listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!isMounted) return;
+
+      if (session?.user) {
+        const u = session.user;
+        const appUser: AppUser = {
+          uid: u.id,
+          id: u.id,
+          email: u.email || undefined,
+          displayName: (u.user_metadata?.name || u.user_metadata?.displayName || u.user_metadata?.full_name) as string | undefined,
+          phone: u.phone || (u.user_metadata?.phone as string | undefined)
+        };
+        setUser(appUser);
+        const resolvedRole = await resolveUserRole(u.id);
+        if (isMounted) setRole(resolvedRole);
+      } else {
+        setUser(null);
+        setRole(null);
+      }
+      if (isMounted) setLoading(false);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [resolveUserRole]);
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setRole(null);
   }, []);
 
   const isAdmin = role === 'Admin';
@@ -130,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isStaff,
         isOwner,
         refreshRole,
+        signOut,
         getIdToken,
         authFetch
       }}

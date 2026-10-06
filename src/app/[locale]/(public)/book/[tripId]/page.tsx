@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ref, get, child } from 'firebase/database';
-import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter, Link } from '@/i18n/routing';
 import Header from '@/components/shared/Header';
@@ -73,20 +71,21 @@ export default function BookingPage() {
     let isMounted = true;
     if (!tripId) return;
 
-    const tripRef = child(ref(db), `trips/${tripId}`);
-    get(tripRef).then((snapshot) => {
-      if (!isMounted) return;
-      if (snapshot.exists()) {
-        const tripData = { id: snapshot.key as string, ...snapshot.val() } as Trip;
-        setTrip(tripData);
-      } else {
-        setTrip(null);
-      }
-      setLoading(false);
-    }).catch((err) => {
-      console.error("Error fetching trip:", err);
-      if (isMounted) setLoading(false);
-    });
+    fetch(`/api/trips/${tripId}`)
+      .then(res => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        if (data.trip) {
+          setTrip(data.trip);
+        } else {
+          setTrip(null);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error fetching trip:", err);
+        if (isMounted) setLoading(false);
+      });
 
     return () => {
       isMounted = false;

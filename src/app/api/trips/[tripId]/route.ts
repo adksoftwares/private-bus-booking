@@ -1,19 +1,42 @@
 import { NextResponse } from 'next/server';
-import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireTripOwnership } from '@/lib/auth-server';
 import { updateTripSchema, formatZodError } from '@/lib/validation/schemas';
+import { Database } from '@/types/database';
 
 export async function GET(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
     const { tripId } = await params;
-    const db = getAdminDatabase();
-    const tripSnap = await db.ref(`trips/${tripId}`).once('value');
+    const supabase = getSupabaseAdminClient();
 
-    if (!tripSnap.exists()) {
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('id', tripId)
+      .maybeSingle();
+
+    if (error || !trip) {
       return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ trip: { id: tripId, ...tripSnap.val() } });
+    return NextResponse.json({
+      trip: {
+        id: trip.id,
+        busId: trip.bus_id,
+        ownerId: trip.owner_id,
+        routeId: trip.route_id,
+        routeSnapshot: trip.route_snapshot,
+        busSnapshot: trip.bus_snapshot,
+        departureDate: trip.departure_date,
+        departureTime: trip.departure_time,
+        arrivalTime: trip.arrival_time,
+        duration: trip.duration,
+        baseFare: trip.base_fare,
+        farePerSeat: trip.fare_per_seat,
+        operatorName: trip.operator_name,
+        status: trip.status
+      }
+    });
   } catch (err: unknown) {
     console.error("GET /api/trips/[tripId] error:", err);
     return NextResponse.json({ error: 'Failed to fetch trip' }, { status: 500 });
@@ -38,32 +61,39 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ tripId
     }
 
     const { status, farePerSeat, departureTime, arrivalTime } = parseResult.data;
-    const db = getAdminDatabase();
-    const now = Date.now();
-    const updates: Record<string, unknown> = {};
+    const supabase = getSupabaseAdminClient();
+
+    const updates: Database['public']['Tables']['trips']['Update'] = {
+      updated_at: new Date().toISOString()
+    };
 
     if (status) {
-      updates[`trips/${tripId}/status`] = status;
+      updates.status = status;
     }
 
     if (farePerSeat !== undefined && farePerSeat !== null) {
       const newFare = Number(farePerSeat);
-      updates[`trips/${tripId}/baseFare`] = newFare;
-      updates[`trips/${tripId}/farePerSeat`] = newFare;
+      updates.base_fare = newFare;
+      updates.fare_per_seat = newFare;
     }
 
     if (departureTime) {
-      updates[`trips/${tripId}/departureTime`] = departureTime;
+      updates.departure_time = departureTime;
     }
 
     if (arrivalTime) {
-      updates[`trips/${tripId}/arrivalTime`] = arrivalTime;
+      updates.arrival_time = arrivalTime;
     }
 
-    updates[`trips/${tripId}/updatedAt`] = now;
+    const { error: updateError } = await supabase
+      .from('trips')
+      .update(updates)
+      .eq('id', tripId);
 
-    const sanitizedUpdates = JSON.parse(JSON.stringify(updates));
-    await db.ref().update(sanitizedUpdates);
+    if (updateError) {
+      console.error("Failed to update trip:", updateError);
+      return NextResponse.json({ error: 'Failed to update trip' }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true, tripId });
   } catch (error: unknown) {

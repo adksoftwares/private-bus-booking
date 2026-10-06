@@ -4,9 +4,6 @@ import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter, Link } from '@/i18n/routing';
 import { useTranslations } from 'next-intl';
-import { ref, update } from 'firebase/database';
-import { db } from '@/lib/firebase';
-import { Bus } from '@/types/bus';
 import { 
   ArrowLeft, 
   Bus as BusIcon, 
@@ -55,7 +52,7 @@ type LayoutType = '2x2' | '2x3' | '2+1';
 type BackRowType = '5-seater' | '4-seater';
 
 export default function NewBusPage() {
-  const { user } = useAuth();
+  const { user, authFetch } = useAuth();
   const router = useRouter();
   const t = useTranslations('fleet');
 
@@ -192,37 +189,32 @@ export default function NewBusPage() {
     setErrorMsg('');
 
     try {
-      const busId = `BUS-${Date.now()}`;
-      const now = Date.now();
-
-      const busPayload: Bus = {
-        id: busId,
-        ownerId: user.uid,
-        name: name.trim(),
-        regNumber: finalRegNumber,
-        type,
-        totalSeats,
-        seatLayout: {
-          rows,
-          cols,
-          aisleCol,
-          type: layoutType,
+      const res = await authFetch('/api/buses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          regNumber: finalRegNumber,
+          type,
           totalSeats,
-          backRowType: layoutType === '2x2' ? backRowType : (layoutType === '2x3' ? '5-seater' : 'with-aisle')
-        },
-        amenities: selectedAmenities,
-        status: 'active',
-        createdAt: now
-      };
+          seatLayout: {
+            rows,
+            cols,
+            aisleCol,
+            type: layoutType,
+            totalSeats,
+            backRowType: layoutType === '2x2' ? backRowType : (layoutType === '2x3' ? '5-seater' : 'with-aisle')
+          },
+          amenities: selectedAmenities,
+          status: 'active'
+        })
+      });
 
-      const updates: Record<string, unknown> = {};
-      updates[`buses/${busId}`] = busPayload;
-      updates[`ownerBuses/${user.uid}/${busId}`] = true;
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save bus to database');
+      }
 
-      // Ensure user role is active Owner in RTDB
-      updates[`owners/${user.uid}/status`] = 'active';
-
-      await update(ref(db), updates);
       router.push('/owner/buses');
     } catch (err: unknown) {
       console.error("Failed to register bus:", err);

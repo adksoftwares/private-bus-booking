@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireOwner } from '@/lib/auth-server';
 import { createTripSchema, formatZodError } from '@/lib/validation/schemas';
-import { Trip, BusSnapshot, RouteSnapshot } from '@/types/trip';
-import { Bus } from '@/types/bus';
+import { Trip, BusSnapshot, RouteSnapshot, BookedSeatInfo } from '@/types/trip';
+import { Json } from '@/types/database';
 
 export async function GET(req: Request) {
   try {
@@ -11,28 +11,68 @@ export async function GET(req: Request) {
     const ownerId = searchParams.get('ownerId');
     const date = searchParams.get('date');
 
-    const db = getAdminDatabase();
-    const tripsSnap = await db.ref('trips').once('value');
+    const supabase = getSupabaseAdminClient();
+    let query = supabase
+      .from('trips')
+      .select('*')
+      .order('departure_date', { ascending: false })
+      .order('departure_time', { ascending: true });
 
-    if (!tripsSnap.exists()) {
-      return NextResponse.json({ trips: [] });
+    if (ownerId) {
+      query = query.eq('owner_id', ownerId);
+    }
+    if (date) {
+      query = query.eq('departure_date', date);
     }
 
-    const trips: Trip[] = [];
-    tripsSnap.forEach((childSnap) => {
-      const trip = { id: childSnap.key as string, ...childSnap.val() } as Trip;
-      if (ownerId && trip.ownerId !== ownerId) return;
-      if (date && trip.departureDate !== date) return;
-      trips.push(trip);
-    });
+    const { data: tripsData, error } = await query;
 
-    // Sort by departureDate desc, then departureTime asc
-    trips.sort((a, b) => {
-      if (a.departureDate !== b.departureDate) {
-        return b.departureDate.localeCompare(a.departureDate);
+    if (error) {
+      console.error("GET /api/trips Supabase error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Also load bookedSeats map for each trip from seat_locks
+    const tripIds = (tripsData || []).map(t => t.id);
+    const locksMap: Record<string, Record<string, BookedSeatInfo>> = {};
+
+    if (tripIds.length > 0) {
+      const { data: seatLocks } = await supabase
+        .from('seat_locks')
+        .select('trip_id, seat_id, status, user_id, expires_at')
+        .in('trip_id', tripIds);
+
+      const now = Date.now();
+      for (const lock of seatLocks || []) {
+        if (lock.status === 'booked' || (lock.status === 'locked' && lock.expires_at && new Date(lock.expires_at).getTime() > now)) {
+          if (!locksMap[lock.trip_id]) locksMap[lock.trip_id] = {};
+          locksMap[lock.trip_id][lock.seat_id] = {
+            status: lock.status as BookedSeatInfo['status'],
+            uid: lock.user_id
+          };
+        }
       }
-      return (a.departureTime || '').localeCompare(b.departureTime || '');
-    });
+    }
+
+    const trips: Trip[] = (tripsData || []).map((t) => ({
+      id: t.id,
+      busId: t.bus_id,
+      ownerId: t.owner_id,
+      routeId: t.route_id || '',
+      routeSnapshot: t.route_snapshot as unknown as RouteSnapshot,
+      busSnapshot: t.bus_snapshot as unknown as BusSnapshot,
+      departureDate: t.departure_date,
+      departureTime: t.departure_time,
+      arrivalTime: t.arrival_time || undefined,
+      duration: t.duration || undefined,
+      baseFare: Number(t.base_fare),
+      farePerSeat: Number(t.fare_per_seat),
+      operatorName: t.operator_name || undefined,
+      status: t.status as Trip['status'],
+      bookedSeats: locksMap[t.id] || {},
+      createdAt: new Date(t.created_at).getTime(),
+      updatedAt: new Date(t.updated_at).getTime()
+    }));
 
     return NextResponse.json({ trips });
   } catch (err: unknown) {
@@ -46,7 +86,7 @@ export async function POST(req: Request) {
   try {
     // 1. Authoritative Server Authentication (Only verified Owners or Admins)
     const authenticatedUser = await requireOwner(req);
-    const db = getAdminDatabase();
+    const supabase = getSupabaseAdminClient();
 
     // 2. Validate request payload with Zod
     const body = await req.json();
@@ -71,26 +111,30 @@ export async function POST(req: Request) {
     } = parseResult.data;
 
     // 3. Verify Bus exists and strictly enforce Owner Fleet Isolation
-    const busSnap = await db.ref(`buses/${busId}`).once('value');
-    if (!busSnap.exists()) {
+    const { data: busData, error: busError } = await supabase
+      .from('buses')
+      .select('*')
+      .eq('id', busId)
+      .maybeSingle();
+
+    if (busError || !busData) {
       return NextResponse.json({ error: 'Selected bus record not found' }, { status: 404 });
     }
 
-    const busData: Bus = busSnap.val();
-    if (authenticatedUser.role !== 'Admin' && busData.ownerId !== authenticatedUser.uid) {
+    if (authenticatedUser.role !== 'Admin' && busData.owner_id !== authenticatedUser.uid) {
       return NextResponse.json({ error: 'Access denied. You do not own this bus.' }, { status: 403 });
     }
 
     // 4. Build bus snapshot
     const busSnapshot: BusSnapshot = {
       name: busData.name,
-      regNumber: busData.regNumber,
+      regNumber: busData.reg_number,
       type: busData.type,
-      totalSeats: busData.totalSeats,
-      seatLayout: busData.seatLayout,
+      totalSeats: busData.total_seats,
+      seatLayout: busData.seat_layout as unknown as BusSnapshot['seatLayout'],
       amenities: busData.amenities || [],
-      operatorName: busData.operatorName || busData.name,
-      ...(busData.imageUrl ? { imageUrl: busData.imageUrl } : {})
+      operatorName: busData.name,
+      ...(busData.image_url ? { imageUrl: busData.image_url } : {})
     };
 
     // 5. Create or resolve Route
@@ -103,61 +147,80 @@ export async function POST(req: Request) {
       id: routeId,
       startCity: cleanStart,
       endCity: cleanEnd,
-      stops: Array.isArray(stops) ? stops : [],
-      estDuration: duration || ''
+      stops: stops.map((s, idx) => ({
+        city: s.city.trim(),
+        stopName: s.stopName.trim(),
+        stopOrder: idx + 1
+      }))
     };
 
-    // 6. Generate Trip ID and authoritative payload
-    const tripId = `TRIP-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-    const now = Date.now();
-    const effectiveOwnerId = busData.ownerId || authenticatedUser.uid;
+    // Save or update Route in Supabase
+    await supabase
+      .from('routes')
+      .upsert([{
+        id: routeId,
+        start_city: cleanStart,
+        end_city: cleanEnd,
+        stops: routeSnapshot.stops as unknown as Json,
+        created_at: new Date().toISOString()
+      }], { onConflict: 'id' });
 
-    const tripPayload: Trip = {
+    // 6. Generate Trip ID & Record
+    const tripId = `TRIP-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+    const finalFare = Number(farePerSeat);
+
+    const tripRecord = {
       id: tripId,
-      busId,
-      busSnapshot,
-      routeId,
-      routeSnapshot,
-      departureDate,
-      departureTime,
-      arrivalTime: arrivalTime || '',
-      duration: duration || '',
-      baseFare: farePerSeat,
-      farePerSeat: farePerSeat,
-      ownerId: effectiveOwnerId,
-      operatorName: busData.operatorName || busData.name,
+      bus_id: busId,
+      owner_id: busData.owner_id,
+      route_id: routeId,
+      route_snapshot: routeSnapshot as unknown as Json,
+      bus_snapshot: busSnapshot as unknown as Json,
+      departure_date: departureDate,
+      departure_time: departureTime,
+      arrival_time: arrivalTime || null,
+      duration: duration || null,
+      base_fare: finalFare,
+      fare_per_seat: finalFare,
+      operator_name: busData.name,
       status: 'scheduled',
-      createdAt: now,
-      updatedAt: now
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
 
-    // 7. Write atomically to RTDB
-    const updates: Record<string, unknown> = {};
-    updates[`trips/${tripId}`] = tripPayload;
-    updates[`ownerTrips/${effectiveOwnerId}/${tripId}`] = true;
-    updates[`busTrips/${busId}/${tripId}`] = true;
-    updates[`routes/${routeId}`] = {
-      id: routeId,
-      startCity: cleanStart,
-      endCity: cleanEnd,
-      stops: stops || [],
-      status: 'active',
-      updatedAt: now
-    };
+    const { error: insertTripError } = await supabase
+      .from('trips')
+      .insert([tripRecord]);
 
-    // Strip any accidental undefined values
-    const sanitizedUpdates = JSON.parse(JSON.stringify(updates));
-    await db.ref().update(sanitizedUpdates);
+    if (insertTripError) {
+      console.error("Failed to insert trip:", insertTripError);
+      return NextResponse.json({ error: 'Failed to create trip schedule in database.' }, { status: 500 });
+    }
 
     return NextResponse.json({
       success: true,
       tripId,
-      trip: tripPayload
+      trip: {
+        id: tripId,
+        busId,
+        ownerId: busData.owner_id,
+        routeId,
+        routeSnapshot,
+        busSnapshot,
+        departureDate,
+        departureTime,
+        arrivalTime,
+        duration,
+        baseFare: finalFare,
+        farePerSeat: finalFare,
+        operatorName: busData.name,
+        status: 'scheduled'
+      }
     });
 
   } catch (error: unknown) {
     const err = error as { statusCode?: number; message?: string };
-    const status = err.statusCode || 500;
-    return NextResponse.json({ error: err.message || 'Failed to schedule trip' }, { status });
+    const statusCode = err.statusCode || 500;
+    return NextResponse.json({ error: err.message || 'Internal server error scheduling trip' }, { status: statusCode });
   }
 }

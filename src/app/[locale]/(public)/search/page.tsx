@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ref, get, query, orderByChild, equalTo } from 'firebase/database';
-import { db } from '@/lib/firebase';
 import { useRouter, Link } from '@/i18n/routing';
 import { Trip } from '@/types/trip';
 import Header from '@/components/shared/Header';
@@ -56,33 +54,26 @@ function SearchResults() {
     let isCancelled = false;
 
     // Fetch bus ratings lookup table in parallel
-    get(ref(db, 'buses')).then((busesSnap) => {
-      if (isCancelled || !busesSnap.exists()) return;
-      const ratingsMap: Record<string, { rating: number; count: number }> = {};
-      busesSnap.forEach((bSnap) => {
-        const bData = bSnap.val();
-        if (bData.rating) {
-          ratingsMap[bSnap.key as string] = {
-            rating: bData.rating,
-            count: bData.ratingCount || 1
-          };
-        }
-      });
-      setBusRatings(ratingsMap);
-    }).catch(() => {});
+    fetch('/api/ratings')
+      .then(res => res.json())
+      .then((data) => {
+        if (isCancelled || !data.ratings) return;
+        setBusRatings(data.ratings);
+      })
+      .catch(() => {});
 
-    // Query Realtime Database by departureDate index
-    const tripsRef = query(ref(db, 'trips'), orderByChild('departureDate'), equalTo(date));
-    get(tripsRef).then((snapshot) => {
-      if (isCancelled) return;
-      if (snapshot.exists()) {
+    // Query trips by date from API
+    fetch(`/api/trips?date=${encodeURIComponent(date)}`)
+      .then(res => res.json())
+      .then((data) => {
+        if (isCancelled) return;
+        const allTrips: Trip[] = data.trips || [];
         const matched: Trip[] = [];
-        snapshot.forEach((snap) => {
-          const tripData = snap.val() as Omit<Trip, 'id'>;
 
+        for (const tripData of allTrips) {
           // Skip non-scheduled trips
           if (tripData.status && tripData.status !== 'scheduled') {
-            return;
+            continue;
           }
 
           const rStart = tripData.routeSnapshot?.startCity || '';
@@ -90,8 +81,8 @@ function SearchResults() {
 
           // 1. Direct Route Match (tolerant to terminal names, aliases, and parent cities)
           if (matchLocation(from, rStart) && matchLocation(to, rEnd)) {
-            matched.push({ id: snap.key as string, ...tripData });
-            return;
+            matched.push(tripData);
+            continue;
           }
 
           // 2. Intermediate Stops Match (Respecting direction)
@@ -106,23 +97,21 @@ function SearchResults() {
             const toIdx = allStops.findIndex(s => matchLocation(to, s));
 
             if (fromIdx !== -1 && toIdx !== -1 && fromIdx < toIdx) {
-              matched.push({ id: snap.key as string, ...tripData });
+              matched.push(tripData);
             }
           }
-        });
+        }
 
         setTrips(matched);
-      } else {
-        setTrips([]);
-      }
-      setLoading(false);
-    }).catch((err) => {
-      console.error("Error fetching trips:", err);
-      if (!isCancelled) {
-        setTrips([]);
         setLoading(false);
-      }
-    });
+      })
+      .catch((err) => {
+        console.error("Error fetching trips:", err);
+        if (!isCancelled) {
+          setTrips([]);
+          setLoading(false);
+        }
+      });
 
     return () => {
       isCancelled = true;

@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from 'react';
-import { ref, onValue, runTransaction } from 'firebase/database';
-import { db } from '@/lib/firebase';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { SeatLayout } from '@/types/trip';
 import { SeatLock } from '@/types/booking';
-import { SEAT_LOCK_DURATION_MS } from '@/lib/constants';
 import { Check } from 'lucide-react';
 
 interface SeatMapProps {
@@ -48,28 +46,20 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (!effectiveUserId) return;
+  const fetchSeatStatuses = useCallback(async () => {
+    if (!tripId) return;
+    try {
+      const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.statuses) {
+        const statuses = data.statuses as Record<string, SeatLock>;
+        setSeatStatuses(statuses);
 
-    // Real-time seat locks listener
-    const locksRef = ref(db, `seatLocks/${tripId}`);
-    const unsubscribe = onValue(locksRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val() as Record<string, SeatLock>;
-        const currentTime = Date.now();
-        const validStatuses: Record<string, SeatLock> = {};
-        
-        for (const [seatId, info] of Object.entries(data)) {
-          if (info.status === 'booked' || (info.expiresAt && info.expiresAt > currentTime)) {
-            validStatuses[seatId] = info;
-          }
-        }
-        setSeatStatuses(validStatuses);
-
-        // Deselect local seats if expired or claimed
+        // Deselect local seats if expired or claimed by another user
         setSelectedSeats(prev => {
           const filtered = prev.filter(s => {
-            const sInfo = validStatuses[s];
+            const sInfo = statuses[s];
             return sInfo && sInfo.status === 'locked' && sInfo.userId === effectiveUserId;
           });
           if (filtered.length !== prev.length && onSeatSelectRef.current) {
@@ -78,13 +68,58 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           }
           return filtered;
         });
-      } else {
-        setSeatStatuses({});
       }
-    });
-
-    return () => unsubscribe();
+    } catch (e) {
+      console.warn("Error fetching seat statuses:", e);
+    }
   }, [tripId, effectiveUserId]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadInitialStatuses = async () => {
+      if (!tripId) return;
+      try {
+        const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isCancelled && data.statuses) {
+          setSeatStatuses(data.statuses as Record<string, SeatLock>);
+        }
+      } catch (e) {
+        console.warn("Error fetching seat statuses:", e);
+      }
+    };
+
+    loadInitialStatuses();
+
+    // Supabase Realtime channel subscription
+    const channel = supabase
+      .channel(`seat_locks_live_${tripId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'seat_locks',
+          filter: `trip_id=eq.${tripId}`
+        },
+        () => {
+          fetchSeatStatuses();
+        }
+      )
+      .subscribe();
+
+    const pollInterval = setInterval(() => {
+      fetchSeatStatuses();
+    }, 8000);
+
+    return () => {
+      isCancelled = true;
+      channel.unsubscribe();
+      clearInterval(pollInterval);
+    };
+  }, [tripId, fetchSeatStatuses]);
 
   const handleSeatClick = async (seatId: string) => {
     if (readOnly || !effectiveUserId || processingSeat) return;
@@ -103,50 +138,51 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
       const isAlreadySelected = selectedSeats.includes(seatId);
 
       if (isAlreadySelected) {
-        // Deselect -> Remove lock atomically
-        await runTransaction(ref(db, `seatLocks/${tripId}/${seatId}`), (current: SeatLock | null) => {
-          if (current && current.status === 'locked' && current.userId === effectiveUserId) {
-            return null;
-          }
-          return current;
+        // Deselect -> Unlock seat via API
+        await fetch('/api/seats/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tripId,
+            seatId,
+            guestSessionId: effectiveUserId
+          })
         });
 
         const updated = selectedSeats.filter(s => s !== seatId);
         setSelectedSeats(updated);
         if (onSeatSelect) onSeatSelect(updated);
+        await fetchSeatStatuses();
       } else {
         if (selectedSeats.length >= 6) {
           alert("Maximum 6 seats allowed per reservation.");
           return;
         }
 
-        const lockExpiry = Date.now() + SEAT_LOCK_DURATION_MS;
-        const result = await runTransaction(ref(db, `seatLocks/${tripId}/${seatId}`), (current: SeatLock | null) => {
-          const transTime = Date.now();
-          if (current) {
-            if (current.status === 'booked') return;
-            if (current.status === 'locked' && current.userId !== effectiveUserId && current.expiresAt && current.expiresAt > transTime) {
-              return;
-            }
-          }
-          return {
-            userId: effectiveUserId,
-            status: 'locked' as const,
-            expiresAt: lockExpiry
-          };
+        const res = await fetch('/api/seats/lock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tripId,
+            seatId,
+            guestSessionId: effectiveUserId
+          })
         });
 
-        if (!result.committed) {
-          alert(`Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
+        const resData = await res.json();
+        if (!res.ok || !resData.success) {
+          alert(resData.message || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
+          await fetchSeatStatuses();
           return;
         }
 
         const updated = [...selectedSeats, seatId];
         setSelectedSeats(updated);
         if (onSeatSelect) onSeatSelect(updated);
+        await fetchSeatStatuses();
       }
     } catch (err) {
-      console.error("Atomic seat lock error:", err);
+      console.error("Seat reservation error:", err);
     } finally {
       setProcessingSeat(null);
     }

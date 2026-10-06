@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from 'react';
-import { ref, get, child } from 'firebase/database';
-import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter, Link } from '@/i18n/routing';
 import { Booking } from '@/types/booking';
@@ -46,33 +44,23 @@ export default function PassengerBookingsPage() {
   const [linking, setLinking] = useState(false);
   const [linkModalError, setLinkModalError] = useState('');
 
-  const loadUserBookings = useCallback(async (uid: string) => {
+  const loadUserBookings = useCallback(async () => {
     setBookingsLoading(true);
     try {
-      const userBookingsRef = ref(db, `indexes/userBookings/${uid}`);
-      const snapshot = await get(userBookingsRef);
-      
-      if (snapshot.exists()) {
-        const bookingIds = Object.keys(snapshot.val());
-        const bookingPromises = bookingIds.map(id => get(child(ref(db), `bookings/${id}`)));
-        const bookingSnapshots = await Promise.all(bookingPromises);
-        
-        const bookingData: Booking[] = bookingSnapshots
-          .filter(s => s.exists())
-          .map(snap => ({ id: snap.key as string, ...snap.val() }));
-          
-        // Sort by newest first
-        bookingData.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        setBookings(bookingData);
+      const res = await authFetch('/api/bookings/user');
+      if (res.ok) {
+        const data = await res.json();
+        setBookings(data.bookings || []);
       } else {
         setBookings([]);
       }
     } catch (err) {
       console.error("Failed to load user bookings:", err);
+      setBookings([]);
     } finally {
       setBookingsLoading(false);
     }
-  }, []);
+  }, [authFetch]);
 
   useEffect(() => {
     let isMounted = true;
@@ -83,7 +71,7 @@ export default function PassengerBookingsPage() {
     const load = async () => {
       await Promise.resolve();
       if (!isMounted) return;
-      await loadUserBookings(user.uid);
+      await loadUserBookings();
     };
 
     load();
@@ -134,7 +122,7 @@ export default function PassengerBookingsPage() {
       setLinkRefInput('');
       setLinkPhoneInput('');
       // Reload bookings
-      loadUserBookings(user.uid);
+      loadUserBookings();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to link booking';
       setLinkModalError(msg);

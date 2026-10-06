@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { DEFAULT_CURRENCY } from '@/lib/constants';
 
@@ -28,15 +28,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Fetch authoritative booking from database using Admin SDK
-    const db = getAdminDatabase();
-    const bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
+    // 3. Fetch authoritative booking from Supabase using Admin client
+    const supabase = getSupabaseAdminClient();
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', orderId)
+      .maybeSingle();
 
-    if (!bookingSnap.exists()) {
+    if (bookingError || !booking) {
       return NextResponse.json({ error: 'Booking not found for orderId' }, { status: 404 });
     }
 
-    const booking = bookingSnap.val();
     if (booking.status !== 'pending' && booking.status !== 'confirmed') {
       return NextResponse.json(
         { error: `Cannot initiate payment for booking with status '${booking.status}'` },
@@ -45,7 +48,7 @@ export async function POST(req: Request) {
     }
 
     // 4. Authoritative amount derived directly from server record
-    const amount = Number(booking.totalAmount);
+    const amount = Number(booking.total_amount);
     if (!amount || isNaN(amount) || amount <= 0) {
       return NextResponse.json({ error: 'Invalid booking ticket amount' }, { status: 400 });
     }
@@ -62,13 +65,17 @@ export async function POST(req: Request) {
     return NextResponse.json({
       hash: finalHash,
       merchantId,
-      formattedAmount,
-      currency
+      amount: formattedAmount,
+      currency,
+      orderId
     });
 
-  } catch (error: unknown) {
-    const err = error as { statusCode?: number; message?: string };
-    const status = err.statusCode || 500;
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status });
+  } catch (err: unknown) {
+    const error = err as Error;
+    console.error("PayHere hash generation error:", error);
+    return NextResponse.json(
+      { error: error.message || 'Internal error calculating payment hash.' },
+      { status: 500 }
+    );
   }
 }

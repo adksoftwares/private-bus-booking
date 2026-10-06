@@ -4,8 +4,6 @@ import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter, Link } from '@/i18n/routing';
 import { useTranslations } from 'next-intl';
-import { ref, get } from 'firebase/database';
-import { db } from '@/lib/firebase';
 import { Bus } from '@/types/bus';
 import { 
   ArrowLeft, 
@@ -22,7 +20,7 @@ import CityAutocomplete from '@/components/shared/CityAutocomplete';
 import { useSearchParams } from 'next/navigation';
 
 export default function NewTripPage() {
-  const { user, isAdmin, authFetch } = useAuth();
+  const { user, authFetch } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryBusId = searchParams.get('busId');
@@ -55,23 +53,17 @@ export default function NewTripPage() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Load Owner's Buses from Firebase
+  // Load Owner's Buses from Supabase API
   useEffect(() => {
     if (!user) return;
 
     let isMounted = true;
-    const busesRef = ref(db, 'buses');
 
-    get(busesRef).then((snap) => {
-      if (!isMounted) return;
-      if (snap.exists()) {
-        const list: Bus[] = [];
-        snap.forEach((childSnap) => {
-          const busData = childSnap.val() as Omit<Bus, 'id'>;
-          if (isAdmin || busData.ownerId === user.uid) {
-            list.push({ id: childSnap.key as string, ...busData });
-          }
-        });
+    authFetch('/api/buses')
+      .then(res => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        const list: Bus[] = data.buses || [];
         setBuses(list);
         if (list.length > 0) {
           const targetId = (queryBusId && list.some(b => b.id === queryBusId)) ? queryBusId : list[0].id;
@@ -82,19 +74,17 @@ export default function NewTripPage() {
           else if (targetBus.type.includes('Semi')) setFarePerSeat(2200);
           else setFarePerSeat(1900);
         }
-      } else {
-        setBuses([]);
-      }
-      setLoadingBuses(false);
-    }).catch((err) => {
-      console.error("Failed to load buses:", err);
-      if (isMounted) setLoadingBuses(false);
-    });
+        setLoadingBuses(false);
+      })
+      .catch((err) => {
+        console.error("Failed to load buses:", err);
+        if (isMounted) setLoadingBuses(false);
+      });
 
     return () => {
       isMounted = false;
     };
-  }, [user, isAdmin, queryBusId]);
+  }, [user, queryBusId, authFetch]);
 
   const updateDuration = (dep: string, arr: string) => {
     if (!dep || !arr) return;

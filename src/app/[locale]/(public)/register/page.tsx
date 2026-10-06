@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { ref, set } from 'firebase/database';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase/client';
 import { useRouter, Link } from '@/i18n/routing';
 import { useSearchParams } from 'next/navigation';
 import { Bus, Lock, Mail, User as UserIcon, Eye, EyeOff, Sparkles, ArrowRight, ShieldCheck } from 'lucide-react';
@@ -31,34 +29,38 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      // 1. Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      const user = userCredential.user;
+      // 1. Create user in Supabase Auth
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            name: name.trim() || 'Passenger',
+            displayName: name.trim() || 'Passenger',
+            full_name: name.trim() || 'Passenger'
+          }
+        }
+      });
 
-      // 2. Set display name in Auth
-      if (name.trim()) {
-        await updateProfile(user, { displayName: name.trim() });
+      if (signUpError) {
+        setError(signUpError.message || 'Registration failed. Please try again.');
+        return;
       }
 
-      // 3. Persist default Passenger profile in Realtime Database
-      await set(ref(db, `users/${user.uid}`), {
-        uid: user.uid,
-        name: name.trim() || 'Passenger',
-        email: email.trim(),
-        role: 'Passenger',
-        createdAt: Date.now()
-      });
+      // 2. Persist default Passenger profile in profiles table
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          name: name.trim() || 'Passenger',
+          email: email.trim(),
+          role: 'Passenger'
+        });
+      }
 
       router.push(redirectUrl);
     } catch (err: unknown) {
-      const errorObj = err as { code?: string; message?: string };
-      if (errorObj.code === 'auth/email-already-in-use') {
-        setError('This email address is already registered. Please log in.');
-      } else if (errorObj.code === 'auth/weak-password') {
-        setError('Password is too weak. Please use at least 6 characters.');
-      } else {
-        setError(errorObj.message || 'Registration failed. Please try again.');
-      }
+      const errorObj = err as { message?: string };
+      setError(errorObj.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }

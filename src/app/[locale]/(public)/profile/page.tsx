@@ -1,15 +1,13 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { ref, get, update } from 'firebase/database';
-import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from '@/i18n/routing';
 import { User, Lock, Phone, Mail, ArrowLeft, ShieldCheck } from 'lucide-react';
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, authFetch } = useAuth();
   const router = useRouter();
   
   const [name, setName] = useState(user?.displayName || '');
@@ -29,29 +27,26 @@ export default function ProfilePage() {
     if (!user) return;
     let isMounted = true;
     
-    // Fetch phone and profile info from RTDB
-    get(ref(db, `users/${user.uid}`)).then(snap => {
-      if (!isMounted) return;
-      if (user.displayName) {
-        setName(user.displayName);
-      }
-      if (snap.exists()) {
-        const u = snap.val();
-        if (u.name && !user.displayName) {
-          setName(u.name);
+    // Fetch profile details from backend API
+    authFetch('/api/auth/profile')
+      .then(res => res.json())
+      .then(data => {
+        if (!isMounted) return;
+        if (data.profile) {
+          if (data.profile.name) setName(data.profile.name);
+          if (data.profile.phone) setPhone(data.profile.phone);
+        } else if (user.displayName) {
+          setName(user.displayName);
         }
-        if (u.phone || u.mobile) {
-          setPhone(u.phone || u.mobile);
-        }
-      }
-    }).catch(err => {
-      console.error("Error loading user profile:", err);
-    });
+      })
+      .catch(err => {
+        console.error("Error loading user profile:", err);
+      });
 
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, authFetch]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,12 +56,18 @@ export default function ProfilePage() {
     setProfileError('');
 
     try {
-      await updateProfile(user, { displayName: name.trim() });
-      await update(ref(db, `users/${user.uid}`), { 
-        phone: phone.trim(), 
-        name: name.trim(),
-        updatedAt: Date.now()
+      await supabase.auth.updateUser({
+        data: { name: name.trim(), displayName: name.trim(), phone: phone.trim() }
       });
+      const res = await authFetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), phone: phone.trim() })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to update profile');
+      }
       setProfileMessage('Profile details updated successfully!');
     } catch (err: unknown) {
       const error = err as Error;
@@ -84,18 +85,27 @@ export default function ProfilePage() {
     setPasswordError('');
 
     try {
-      const credential = EmailAuthProvider.credential(user.email, currentPassword);
-      
-      // Re-authenticate user before changing sensitive credential
-      await reauthenticateWithCredential(user, credential);
-      await updatePassword(user, newPassword);
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword
+      });
+      if (verifyError) {
+        throw new Error('Current password is incorrect. Please verify and try again.');
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      if (updateError) {
+        throw updateError;
+      }
       
       setPasswordMessage('Password changed successfully!');
       setCurrentPassword('');
       setNewPassword('');
     } catch (err: unknown) {
       const error = err as Error;
-      setPasswordError(error.message || 'Failed to update password. Please ensure your current password is correct.');
+      setPasswordError(error.message || 'Failed to update password.');
     } finally {
       setLoadingPassword(false);
     }

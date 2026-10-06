@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Link, useRouter } from '@/i18n/routing';
 import { useTranslations } from 'next-intl';
-import { ref, get, update, serverTimestamp } from 'firebase/database';
-import { db } from '@/lib/firebase';
 import { Bus } from '@/types/bus';
 import { 
   Bus as BusIcon, 
@@ -25,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export default function FleetPage() {
-  const { user, isOwner, isAdmin, refreshRole } = useAuth();
+  const { user, isOwner, isAdmin, refreshRole, authFetch } = useAuth();
   const router = useRouter();
   const t = useTranslations('fleet');
 
@@ -39,33 +37,22 @@ export default function FleetPage() {
 
     let isMounted = true;
 
-    const busesRef = ref(db, 'buses');
-    get(busesRef).then((snap) => {
-      if (!isMounted) return;
-
-      if (snap.exists()) {
-        const list: Bus[] = [];
-        snap.forEach((childSnap) => {
-          const data = childSnap.val() as Omit<Bus, 'id'>;
-          // Admin sees all, Owner sees only their buses
-          if (isAdmin || data.ownerId === user.uid) {
-            list.push({ id: childSnap.key as string, ...data });
-          }
-        });
-        setBuses(list);
-      } else {
-        setBuses([]);
-      }
-      setLoading(false);
-    }).catch((err) => {
-      console.error("Error loading bus fleet:", err);
-      if (isMounted) setLoading(false);
-    });
+    authFetch('/api/buses')
+      .then(res => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        setBuses(data.buses || []);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error loading bus fleet:", err);
+        if (isMounted) setLoading(false);
+      });
 
     return () => {
       isMounted = false;
     };
-  }, [user, isAdmin]);
+  }, [user, authFetch]);
 
   const handleBecomeOwner = async () => {
     if (!user) return;
@@ -73,18 +60,20 @@ export default function FleetPage() {
     setNotice(null);
 
     try {
-      const now = Date.now();
-      const updates: Record<string, unknown> = {};
-      updates[`users/${user.uid}/role`] = 'Owner';
-      updates[`owners/${user.uid}`] = {
-        uid: user.uid,
-        name: user.displayName || 'Bus Operator',
-        email: user.email || '',
-        registeredAt: now,
-        status: 'active'
-      };
+      const res = await authFetch('/api/auth/owner-register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: user.displayName || 'Bus Operator',
+          phone: user.phone || ''
+        })
+      });
 
-      await update(ref(db), updates);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to register as bus operator');
+      }
+
       await refreshRole();
       setNotice({ type: 'success', message: 'Congratulations! Your account is now registered as a Bus Operator.' });
     } catch (err: unknown) {
@@ -99,11 +88,14 @@ export default function FleetPage() {
   const toggleBusStatus = async (busId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'active' ? 'maintenance' : 'active';
     try {
-      await update(ref(db, `buses/${busId}`), {
-        status: nextStatus,
-        updatedAt: serverTimestamp()
+      const res = await authFetch(`/api/buses/${busId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
       });
-      setBuses(prev => prev.map(b => b.id === busId ? { ...b, status: nextStatus as Bus['status'] } : b));
+      if (res.ok) {
+        setBuses(prev => prev.map(b => b.id === busId ? { ...b, status: nextStatus as Bus['status'] } : b));
+      }
     } catch (err) {
       console.error("Failed to toggle bus status:", err);
     }

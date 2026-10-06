@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase/client';
 import { useRouter, Link } from '@/i18n/routing';
 import { useSearchParams } from 'next/navigation';
 import { Bus, Lock, Mail, Eye, EyeOff, Sparkles, ArrowRight } from 'lucide-react';
@@ -23,17 +22,22 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      router.push(redirectUrl);
-    } catch (err: unknown) {
-      const errorObj = err as { code?: string; message?: string };
-      if (errorObj.code === 'auth/invalid-credential' || errorObj.code === 'auth/user-not-found' || errorObj.code === 'auth/wrong-password') {
-        setError('Invalid email or password. Please verify your login credentials.');
-      } else if (errorObj.code === 'auth/too-many-requests') {
-        setError('Access temporarily throttled due to multiple failed attempts. Please try again in a few moments.');
-      } else {
-        setError(errorObj.message || 'Login failed. Please try again.');
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password
+      });
+
+      if (signInError) {
+        setError(signInError.message || 'Invalid email or password. Please verify your login credentials.');
+        return;
       }
+
+      if (data.session) {
+        router.push(redirectUrl);
+      }
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setError(errorObj.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }

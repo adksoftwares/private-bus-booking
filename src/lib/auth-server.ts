@@ -1,4 +1,4 @@
-import { getAdminAuth, getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { UserRole } from '@/types/user';
 
 export class HttpError extends Error {
@@ -21,7 +21,7 @@ export interface AuthenticatedUser {
 }
 
 /**
- * Extracts and verifies the Firebase ID token from the Authorization header.
+ * Extracts and verifies the Supabase Auth access token from the Authorization header or cookies.
  * Derives user identity strictly on the server (anti-spoofing).
  */
 export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedUser | null> {
@@ -34,34 +34,37 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
     const token = authHeader.substring(7).trim();
     if (!token) return null;
 
-    const auth = getAdminAuth();
-    const decodedToken = await auth.verifyIdToken(token);
-    const uid = decodedToken.uid;
-    const email = decodedToken.email;
-    const name = decodedToken.name;
-    const phone = (decodedToken as Record<string, unknown>).phone_number as string | undefined;
+    const supabase = getSupabaseAdminClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
 
-    // Check custom claims first
+    if (error || !user) {
+      return null;
+    }
+
+    const uid = user.id;
+    const email = user.email;
+    const phone = user.phone || (user.user_metadata?.phone as string | undefined);
+    const name = (user.user_metadata?.name || user.user_metadata?.displayName || user.user_metadata?.full_name) as string | undefined;
+
+    // Check profiles table for role
     let role: UserRole = 'Passenger';
-    if (decodedToken.role) {
-      const claimRole = decodedToken.role as string;
-      if (claimRole === 'Admin') role = 'Admin';
-      else if (claimRole === 'Owner') role = 'Owner';
-      else if (claimRole === 'Conductor' || claimRole === 'Driver') role = 'Conductor';
-    } else {
-      // Look up user in RTDB to determine authoritative role
-      const db = getAdminDatabase();
-      const [userSnap, ownerSnap] = await Promise.all([
-        db.ref(`users/${uid}`).once('value'),
-        db.ref(`owners/${uid}`).once('value')
-      ]);
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, name, phone')
+      .eq('id', uid)
+      .maybeSingle();
 
-      if (userSnap.exists()) {
-        const dbRole = userSnap.val().role;
-        if (dbRole === 'Admin') role = 'Admin';
-        else if (dbRole === 'Owner') role = 'Owner';
-        else if (dbRole === 'Conductor') role = 'Conductor';
-      } else if (ownerSnap.exists()) {
+    if (profile?.role) {
+      role = profile.role as UserRole;
+    } else {
+      // Check owners table
+      const { data: owner } = await supabase
+        .from('owners')
+        .select('id')
+        .eq('id', uid)
+        .maybeSingle();
+
+      if (owner) {
         role = 'Owner';
       }
     }
@@ -69,8 +72,8 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
     return {
       uid,
       email,
-      phone,
-      name,
+      phone: profile?.phone || phone,
+      name: profile?.name || name,
       role,
       isAdmin: role === 'Admin',
       isOwner: role === 'Owner' || role === 'Admin',
@@ -100,101 +103,66 @@ export async function requireAuth(req: Request): Promise<AuthenticatedUser> {
 export async function requireAdmin(req: Request): Promise<AuthenticatedUser> {
   const user = await requireAuth(req);
   if (!user.isAdmin) {
-    throw new HttpError(403, 'Access denied. Administrator privileges required.');
+    throw new HttpError(403, 'Administrative privileges required for this operation.');
   }
   return user;
 }
 
 /**
- * Requires a Bus Operator (Owner) or Admin or throws 403.
+ * Requires an Owner or Admin user or throws 403.
  */
 export async function requireOwner(req: Request): Promise<AuthenticatedUser> {
   const user = await requireAuth(req);
   if (!user.isOwner && !user.isAdmin) {
-    throw new HttpError(403, 'Access denied. Registered bus operator privileges required.');
+    throw new HttpError(403, 'Bus Operator / Owner privileges required for this operation.');
   }
   return user;
 }
 
 /**
- * Requires a Conductor, Owner, or Admin or throws 403.
+ * Requires a Conductor, Owner, or Admin user or throws 403.
  */
-export async function requireStaffOrAdmin(req: Request): Promise<AuthenticatedUser> {
+export async function requireConductor(req: Request): Promise<AuthenticatedUser> {
   const user = await requireAuth(req);
   if (!user.isConductor && !user.isOwner && !user.isAdmin) {
-    throw new HttpError(403, 'Access denied. Authorized bus crew or conductor privileges required.');
+    throw new HttpError(403, 'Bus Conductor or Staff privileges required for this operation.');
   }
   return user;
 }
 
+export const requireStaffOrAdmin = requireConductor;
+
 /**
- * Verifies that the authenticated caller owns the given trip, or is an Admin.
+ * Verifies that the authenticated user owns the resource or is an Admin.
  */
-export async function requireTripOwnership(req: Request, tripId: string): Promise<{ user: AuthenticatedUser; trip: Record<string, unknown> }> {
-  const user = await requireOwner(req);
-  const db = getAdminDatabase();
-  const tripSnap = await db.ref(`trips/${tripId}`).once('value');
-
-  if (!tripSnap.exists()) {
-    throw new HttpError(404, 'Scheduled trip not found.');
+export function assertOwnerOrAdmin(user: AuthenticatedUser, resourceOwnerId: string): void {
+  if (user.isAdmin) return;
+  if (user.uid !== resourceOwnerId) {
+    throw new HttpError(403, 'Access denied: You do not own this resource.');
   }
-
-  const trip = tripSnap.val();
-  if (!user.isAdmin && trip.ownerId !== user.uid) {
-    throw new HttpError(403, 'Access denied. You do not own this trip schedule.');
-  }
-
-  return { user, trip };
 }
 
 /**
- * Verifies that the staff member is assigned to this trip or bus, or is an Admin/Owner of the trip.
+ * Requires that the authenticated user owns the given trip or is an Admin.
  */
-export async function requireConductorTripAccess(req: Request, tripId: string): Promise<{ user: AuthenticatedUser; trip: Record<string, unknown> }> {
-  const user = await requireStaffOrAdmin(req);
-  const db = getAdminDatabase();
-  const tripSnap = await db.ref(`trips/${tripId}`).once('value');
+export async function requireTripOwnership(req: Request, tripId: string): Promise<AuthenticatedUser> {
+  const user = await requireAuth(req);
+  if (user.isAdmin) return user;
 
-  if (!tripSnap.exists()) {
-    throw new HttpError(404, 'Trip record not found for verification.');
+  const supabase = getSupabaseAdminClient();
+  const { data: trip, error } = await supabase
+    .from('trips')
+    .select('owner_id')
+    .eq('id', tripId)
+    .maybeSingle();
+
+  if (error || !trip) {
+    throw new HttpError(404, 'Trip not found.');
   }
 
-  const trip = tripSnap.val();
-
-  // Admins and the trip's direct owner have full access
-  if (user.isAdmin || trip.ownerId === user.uid) {
-    return { user, trip };
+  if (trip.owner_id !== user.uid) {
+    throw new HttpError(403, 'Access denied: You do not own this trip schedule.');
   }
 
-  // If conductor, check trip assignment
-  // Supports: trip.conductorId, trip.assignedStaff, or bus.conductorId
-  let isAssigned = false;
-  if (trip.conductorId === user.uid) {
-    isAssigned = true;
-  } else if (trip.assignedStaff && typeof trip.assignedStaff === 'object' && trip.assignedStaff[user.uid]) {
-    isAssigned = true;
-  } else if (trip.busId) {
-    const busSnap = await db.ref(`buses/${trip.busId}`).once('value');
-    if (busSnap.exists()) {
-      const bus = busSnap.val();
-      if (bus.conductorId === user.uid || (bus.assignedStaff && bus.assignedStaff[user.uid])) {
-        isAssigned = true;
-      }
-    }
-  }
-
-  // In standard Sri Lankan private bus network operations, if conductor is verified staff of the fleet
-  // and no fine-grained restriction is set on the trip, allow verified crew of that operator
-  if (!isAssigned && trip.ownerId) {
-    const crewSnap = await db.ref(`operatorStaff/${trip.ownerId}/${user.uid}`).once('value');
-    if (crewSnap.exists()) {
-      isAssigned = true;
-    }
-  }
-
-  if (!isAssigned) {
-    throw new HttpError(403, 'Access denied. You are not assigned as the conductor for this trip.');
-  }
-
-  return { user, trip };
+  return user;
 }

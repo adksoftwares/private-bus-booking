@@ -1,9 +1,73 @@
 import { NextResponse } from 'next/server';
-import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { submitBusRatingSchema, formatZodError } from '@/lib/validation/schemas';
-import { Booking } from '@/types/booking';
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const busId = searchParams.get('busId');
+
+    const supabase = getSupabaseAdminClient();
+
+    if (busId) {
+      const { data: reviews, error } = await supabase
+        .from('bus_reviews')
+        .select('*')
+        .eq('bus_id', busId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      const count = reviews.length;
+      const avg = count > 0 
+        ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / count).toFixed(1))
+        : 5.0;
+
+      return NextResponse.json({
+        busId,
+        rating: avg,
+        ratingCount: count,
+        reviews
+      });
+    }
+
+    // Return all bus ratings
+    const { data: allReviews, error } = await supabase
+      .from('bus_reviews')
+      .select('bus_id, rating');
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const ratingsMap: Record<string, { rating: number; count: number }> = {};
+    for (const r of allReviews || []) {
+      if (!ratingsMap[r.bus_id]) {
+        ratingsMap[r.bus_id] = { rating: 0, count: 0 };
+      }
+      ratingsMap[r.bus_id].rating += r.rating;
+      ratingsMap[r.bus_id].count += 1;
+    }
+
+    const result: Record<string, { rating: number; count: number }> = {};
+    for (const [bId, data] of Object.entries(ratingsMap)) {
+      result[bId] = {
+        rating: Number((data.rating / data.count).toFixed(1)),
+        count: data.count
+      };
+    }
+
+    return NextResponse.json({ ratings: result });
+
+  } catch (error: unknown) {
+    const err = error as Error;
+    return NextResponse.json({ error: err.message || 'Failed to fetch ratings' }, { status: 500 });
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -21,22 +85,21 @@ export async function POST(req: Request) {
     }
 
     const { busId, bookingId, rating, review } = parseResult.data;
-    const db = getAdminDatabase();
+    const supabase = getSupabaseAdminClient();
 
     // 3. Optional user auth
     const authUser = await getAuthenticatedUser(req);
 
     // 4. Verify booking eligibility (must be a completed/confirmed booking for this bus)
-    let bookingSnap = await db.ref(`bookings/${bookingId}`).once('value');
-    if (!bookingSnap.exists()) {
-      bookingSnap = await db.ref(`tickets/${bookingId}`).once('value');
-    }
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .maybeSingle();
 
-    if (!bookingSnap.exists()) {
+    if (bookingError || !booking) {
       return NextResponse.json({ error: 'Valid booking reference is required to submit a rating.' }, { status: 404 });
     }
-
-    const booking: Booking = bookingSnap.val();
 
     // Verify booking is confirmed or boarded
     if (booking.status !== 'confirmed' && booking.status !== 'boarded') {
@@ -45,63 +108,64 @@ export async function POST(req: Request) {
 
     // Verify ownership
     if (authUser) {
-      if (booking.userId && booking.userId !== authUser.uid) {
+      if (booking.user_id && booking.user_id !== authUser.uid) {
         return NextResponse.json({ error: 'You can only rate trips booked under your account.' }, { status: 403 });
       }
     } else {
       // For guest, check accessToken if provided in body
-      if (body.accessToken && booking.accessToken && body.accessToken !== booking.accessToken) {
+      if (body.accessToken && booking.access_token && body.accessToken !== booking.access_token) {
         return NextResponse.json({ error: 'Invalid access token for this booking.' }, { status: 403 });
       }
     }
 
     // 5. Check if this booking was already reviewed
-    const existingReviewSnap = await db.ref(`busReviews/${busId}/${bookingId}`).once('value');
-    if (existingReviewSnap.exists()) {
+    const { data: existingReview } = await supabase
+      .from('bus_reviews')
+      .select('id')
+      .eq('bus_id', busId)
+      .eq('booking_id', bookingId)
+      .maybeSingle();
+
+    if (existingReview) {
       return NextResponse.json({ error: 'You have already submitted a review for this journey.' }, { status: 409 });
     }
 
-    // 6. Record review
-    const now = Date.now();
-    const reviewRecord = {
-      bookingId,
-      busId,
-      rating,
-      review: review?.trim() || '',
-      passengerName: booking.passengerName ? `${booking.passengerName[0]}***` : 'Verified Passenger',
-      createdAt: now
-    };
+    // 6. Record review in PostgreSQL
+    const passengerName = booking.passenger_name ? `${booking.passenger_name[0]}***` : 'Verified Passenger';
 
-    // 7. Atomic transaction on Bus to update rating stats
-    const busRef = db.ref(`buses/${busId}`);
-    const busResult = await busRef.transaction((currentBus) => {
-      if (!currentBus) return;
+    const { error: insertReviewError } = await supabase
+      .from('bus_reviews')
+      .insert([{
+        bus_id: busId,
+        booking_id: bookingId,
+        user_id: authUser ? authUser.uid : null,
+        passenger_name: passengerName,
+        rating,
+        comment: review?.trim() || null,
+        created_at: new Date().toISOString()
+      }]);
 
-      const currentCount = currentBus.ratingCount || 0;
-      const currentAvg = currentBus.rating || 5.0;
-
-      const newCount = currentCount + 1;
-      const newAvg = Number(((currentAvg * currentCount + rating) / newCount).toFixed(1));
-
-      currentBus.rating = newAvg;
-      currentBus.ratingCount = newCount;
-      currentBus.updatedAt = now;
-
-      return currentBus;
-    });
-
-    if (!busResult.committed) {
-      return NextResponse.json({ error: 'Bus not found or update conflict.' }, { status: 404 });
+    if (insertReviewError) {
+      console.error("Failed to insert review:", insertReviewError);
+      return NextResponse.json({ error: 'Failed to record review.' }, { status: 500 });
     }
 
-    // Save review record
-    await db.ref(`busReviews/${busId}/${bookingId}`).set(reviewRecord);
+    // 7. Calculate new aggregate rating for bus
+    const { data: busReviews } = await supabase
+      .from('bus_reviews')
+      .select('rating')
+      .eq('bus_id', busId);
+
+    const totalReviews = busReviews ? busReviews.length : 1;
+    const avgRating = busReviews && busReviews.length > 0
+      ? Number((busReviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1))
+      : rating;
 
     return NextResponse.json({
       success: true,
       message: 'Thank you! Your verified bus rating has been submitted.',
-      rating: busResult.snapshot.val().rating,
-      ratingCount: busResult.snapshot.val().ratingCount
+      rating: avgRating,
+      ratingCount: totalReviews
     });
 
   } catch (error: unknown) {

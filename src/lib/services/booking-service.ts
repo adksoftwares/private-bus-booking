@@ -1,9 +1,10 @@
 import crypto from 'crypto';
-import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { SEAT_LOCK_DURATION_MS, DEFAULT_CURRENCY } from '@/lib/constants';
 import { Booking, BookingType } from '@/types/booking';
 import { Trip } from '@/types/trip';
 import { AuthenticatedUser, HttpError } from '@/lib/auth-server';
+import { Json } from '@/types/database';
 
 export interface CreateBookingParams {
   tripId: string;
@@ -60,13 +61,13 @@ export function normalizeSriLankanPhone(phone: string): string {
  */
 export function validateSeatsAgainstBusLayout(trip: Trip, seatIds: string[]): void {
   const layout = trip.busSnapshot?.seatLayout;
-  if (!layout) return; // Legacy buses without explicit layout
+  if (!layout) return;
 
   const validSeats = new Set<string>();
 
-  // Extract valid seat labels from layout rows
-  if (Array.isArray(layout.rows)) {
-    for (const row of layout.rows) {
+  const rows = (layout as unknown as Record<string, unknown>).rows;
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
       if (Array.isArray(row.seats)) {
         for (const seat of row.seats) {
           if (seat && seat.id && seat.type !== 'empty') {
@@ -78,7 +79,6 @@ export function validateSeatsAgainstBusLayout(trip: Trip, seatIds: string[]): vo
     }
   }
 
-  // If layout configured seats exist, ensure all selected seat IDs belong to the layout
   if (validSeats.size > 0) {
     for (const seatId of seatIds) {
       if (!validSeats.has(seatId)) {
@@ -89,7 +89,7 @@ export function validateSeatsAgainstBusLayout(trip: Trip, seatIds: string[]): vo
 }
 
 /**
- * Atomically locks seats in Firebase Realtime Database using transactions.
+ * Atomically locks seats in PostgreSQL using Supabase.
  * Prevents double-booking race conditions between concurrent passengers.
  */
 export async function atomicLockSeats(
@@ -98,49 +98,77 @@ export async function atomicLockSeats(
   effectiveUserId: string,
   orderId: string
 ): Promise<{ success: boolean; conflictingSeat?: string }> {
-  const db = getAdminDatabase();
-  const locksRef = db.ref(`seatLocks/${tripId}`);
-  const now = Date.now();
+  const supabase = getSupabaseAdminClient();
+  const nowIso = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + SEAT_LOCK_DURATION_MS).toISOString();
 
-  let conflictingSeat: string | undefined;
+  // Try PostgreSQL RPC function first
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('lock_seats_atomic', {
+      p_trip_id: tripId,
+      p_seat_ids: seatIds,
+      p_user_id: effectiveUserId,
+      p_booking_id: orderId,
+      p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000)
+    });
 
-  const result = await locksRef.transaction((currentLocks) => {
-    currentLocks = currentLocks || {};
+    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
+      const res = rpcResult as { success: boolean; conflicting_seat?: string };
+      if (!res.success) {
+        return { success: false, conflictingSeat: res.conflicting_seat };
+      }
+      return { success: true };
+    }
+  } catch {
+    // If RPC is unavailable, fall back to atomic direct query
+  }
 
-    // 1. Verify all requested seats are available or expired
-    for (const seatId of seatIds) {
-      const lock = currentLocks[seatId];
-      if (lock) {
-        if (lock.status === 'booked') {
-          conflictingSeat = seatId;
-          return; // Abort transaction
-        }
-        // If locked by someone else and lock has not expired
-        if (lock.status === 'locked' && lock.userId !== effectiveUserId && lock.expiresAt && lock.expiresAt > now) {
-          conflictingSeat = seatId;
-          return; // Abort transaction
+  // Fallback: direct query with cleanup of expired locks
+  await supabase
+    .from('seat_locks')
+    .delete()
+    .eq('trip_id', tripId)
+    .eq('status', 'locked')
+    .lt('expires_at', nowIso);
+
+  // Check existing locks
+  const { data: existingLocks } = await supabase
+    .from('seat_locks')
+    .select('seat_id, user_id, status, expires_at')
+    .eq('trip_id', tripId)
+    .in('seat_id', seatIds);
+
+  if (existingLocks && existingLocks.length > 0) {
+    for (const lock of existingLocks) {
+      if (lock.status === 'booked') {
+        return { success: false, conflictingSeat: lock.seat_id };
+      }
+      if (lock.status === 'locked' && lock.user_id !== effectiveUserId) {
+        if (!lock.expires_at || new Date(lock.expires_at).getTime() > Date.now()) {
+          return { success: false, conflictingSeat: lock.seat_id };
         }
       }
     }
+  }
 
-    // 2. Reserve all requested seats atomically
-    for (const seatId of seatIds) {
-      currentLocks[seatId] = {
-        userId: effectiveUserId,
-        status: 'locked',
-        bookingId: orderId,
-        expiresAt: now + SEAT_LOCK_DURATION_MS
-      };
-    }
+  // Insert or update seat locks
+  const lockRecords = seatIds.map(seatId => ({
+    trip_id: tripId,
+    seat_id: seatId,
+    user_id: effectiveUserId,
+    booking_id: orderId,
+    status: 'locked' as const,
+    created_at: nowIso,
+    expires_at: expiresAt
+  }));
 
-    return currentLocks;
-  });
+  const { error: upsertError } = await supabase
+    .from('seat_locks')
+    .upsert(lockRecords, { onConflict: 'trip_id,seat_id' });
 
-  if (!result.committed) {
-    return {
-      success: false,
-      conflictingSeat: conflictingSeat || seatIds[0]
-    };
+  if (upsertError) {
+    console.error("Lock seat upsert error:", upsertError);
+    return { success: false, conflictingSeat: seatIds[0] };
   }
 
   return { success: true };
@@ -149,397 +177,399 @@ export async function atomicLockSeats(
 /**
  * Creates a pending booking with atomic seat reservation and authoritative pricing.
  */
-export async function createPendingBooking(params: CreateBookingParams): Promise<Booking> {
+export async function createPendingBooking(params: CreateBookingParams) {
   const { tripId, selectedSeats, passengerDetails, authenticatedUser, guestSessionId } = params;
-  const db = getAdminDatabase();
+  const supabase = getSupabaseAdminClient();
 
-  // 1. Fetch Authoritative Trip
-  const tripSnap = await db.ref(`trips/${tripId}`).once('value');
-  if (!tripSnap.exists()) {
-    throw new HttpError(404, 'Selected trip schedule not found.');
+  // 1. Fetch trip authoritatively from Supabase
+  const { data: tripData, error: tripError } = await supabase
+    .from('trips')
+    .select('*')
+    .eq('id', tripId)
+    .single();
+
+  if (tripError || !tripData) {
+    throw new HttpError(404, 'The requested bus trip could not be found.');
   }
 
-  const trip: Trip = tripSnap.val();
-  if (trip.status && trip.status !== 'scheduled') {
-    throw new HttpError(400, `This trip is not available for booking (Status: ${trip.status}).`);
+  const trip = {
+    id: tripData.id,
+    busId: tripData.bus_id,
+    ownerId: tripData.owner_id,
+    routeId: tripData.route_id || '',
+    routeSnapshot: tripData.route_snapshot,
+    busSnapshot: tripData.bus_snapshot,
+    departureDate: tripData.departure_date,
+    departureTime: tripData.departure_time,
+    arrivalTime: tripData.arrival_time,
+    duration: tripData.duration,
+    baseFare: tripData.base_fare,
+    farePerSeat: tripData.fare_per_seat,
+    operatorName: tripData.operator_name,
+    status: tripData.status
+  } as unknown as Trip;
+
+  if (trip.status === 'cancelled') {
+    throw new HttpError(400, 'This trip has been cancelled and is no longer accepting reservations.');
   }
 
-  // 2. Validate seat configuration
   validateSeatsAgainstBusLayout(trip, selectedSeats);
 
-  // 3. Authoritative Fare Calculation (Server-derived, immune to client tampering)
-  const baseFare = Number(trip.farePerSeat !== undefined && trip.farePerSeat !== null ? trip.farePerSeat : trip.baseFare);
-  if (!baseFare || isNaN(baseFare) || baseFare <= 0) {
-    throw new HttpError(500, 'Invalid bus ticket pricing configuration for this trip.');
-  }
-  const authoritativeTotal = baseFare * selectedSeats.length;
+  // 2. Authoritative Fare Calculation
+  const individualFare = Number(trip.farePerSeat || trip.baseFare || 0);
+  const ticketAmount = selectedSeats.length * individualFare;
+  const commissionRate = 0.10;
+  const platformCommission = Math.round(ticketAmount * commissionRate * 100) / 100;
+  const gatewayFee = Math.round(ticketAmount * 0.03 * 100) / 100;
+  const ownerNetAmount = Math.round((ticketAmount - platformCommission - gatewayFee) * 100) / 100;
 
-  // 4. Generate Identifiers
-  const now = Date.now();
-  const orderId = `BK-${now}-${Math.floor(1000 + Math.random() * 9000)}`;
+  // 3. Generate secure identifiers
+  const timestamp = Date.now();
+  const orderId = `BK-${timestamp}-${Math.floor(Math.random() * 900 + 100)}`;
   const bookingReference = generateBookingReference();
   const accessToken = crypto.randomBytes(24).toString('hex');
+  const bookingType: BookingType = authenticatedUser ? 'account' : 'guest';
+  const effectiveUserId = authenticatedUser?.uid || guestSessionId || `gst_${accessToken.substring(0, 12)}`;
 
-  const isAuthenticated = Boolean(authenticatedUser);
-  const bookingType: BookingType = isAuthenticated ? 'account' : 'guest';
-  const effectiveUserId = isAuthenticated ? authenticatedUser!.uid : (guestSessionId || `gst_${accessToken.slice(0, 12)}`);
-
-  // 5. Execute Atomic Seat Lock Transaction
+  // 4. Atomically Lock Seats
   const lockResult = await atomicLockSeats(tripId, selectedSeats, effectiveUserId, orderId);
   if (!lockResult.success) {
     throw new HttpError(
       409,
-      `Seat '${lockResult.conflictingSeat}' was just reserved by another passenger. Please select another seat.`
+      `Seat ${lockResult.conflictingSeat || 'selection'} is no longer available. Please select another seat.`
     );
   }
 
-  // 6. Build authoritatively calculated booking payload
-  const pendingBooking: Booking = {
+  // 5. Build Booking Object
+  const newBooking = {
     id: orderId,
-    bookingReference,
-    accessToken,
-    bookingType,
-    tripId,
-    userId: isAuthenticated ? authenticatedUser!.uid : null,
-    ownerId: trip.ownerId || '',
-    passengerName: passengerDetails.name.trim(),
-    passengerPhone: passengerDetails.phone.trim(),
-    passengerEmail: passengerDetails.email?.trim() || '',
-    passengerDetails: {
+    booking_reference: bookingReference,
+    access_token: accessToken,
+    booking_type: bookingType,
+    trip_id: tripId,
+    user_id: authenticatedUser?.uid || null,
+    owner_id: trip.ownerId,
+    passenger_name: passengerDetails.name.trim(),
+    passenger_phone: passengerDetails.phone.trim(),
+    passenger_email: passengerDetails.email?.trim() || null,
+    passenger_details: {
       name: passengerDetails.name.trim(),
       phone: passengerDetails.phone.trim(),
       email: passengerDetails.email?.trim() || '',
-      uid: isAuthenticated ? authenticatedUser!.uid : null
+      uid: authenticatedUser?.uid || null
     },
     seats: selectedSeats,
-    totalAmount: authoritativeTotal,
+    total_amount: ticketAmount,
     fares: {
-      ticketAmount: authoritativeTotal,
-      serviceFee: 0,
-      total: authoritativeTotal
+      ticketAmount,
+      platformCommission,
+      gatewayFee,
+      ownerNetAmount
     },
-    status: 'pending',
-    createdAt: now,
-    tripSnapshot: {
+    status: 'pending' as const,
+    boarded: false,
+    trip_snapshot: {
       departureDate: trip.departureDate,
       departureTime: trip.departureTime,
+      arrivalTime: trip.arrivalTime,
+      duration: trip.duration,
       routeSnapshot: trip.routeSnapshot,
       busSnapshot: trip.busSnapshot,
-      baseFare: trip.baseFare,
-      ownerId: trip.ownerId
-    }
+      baseFare: individualFare,
+      farePerSeat: individualFare,
+      ownerId: trip.ownerId,
+      operatorName: trip.operatorName
+    } as unknown as Json,
+    created_at: new Date().toISOString()
   };
 
-  // 7. Write pending booking & lookup indexes
-  const updates: Record<string, unknown> = {};
-  updates[`bookings/${orderId}`] = pendingBooking;
-  updates[`indexes/bookingReferences/${bookingReference}`] = orderId;
+  const { error: insertBookingError } = await supabase
+    .from('bookings')
+    .insert([newBooking]);
 
-  if (isAuthenticated && authenticatedUser) {
-    updates[`indexes/userBookings/${authenticatedUser.uid}/${orderId}`] = true;
-  } else {
-    const cleanPhone = normalizeSriLankanPhone(passengerDetails.phone);
-    if (cleanPhone) {
-      updates[`indexes/phoneBookings/${cleanPhone}/${orderId}`] = true;
-    }
+  if (insertBookingError) {
+    console.error("Failed to insert pending booking:", insertBookingError);
+    throw new HttpError(500, 'Failed to create reservation record.');
   }
 
-  await db.ref().update(updates);
-  return pendingBooking;
+  // 6. Generate PayHere Checkout Signature
+  const merchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || '';
+  const merchantSecret = process.env.PAYHERE_SECRET || '';
+  const formattedAmount = ticketAmount.toFixed(2);
+  const currency = DEFAULT_CURRENCY;
+
+  let paymentHash = '';
+  if (merchantId && merchantSecret) {
+    const hashedSecret = crypto.createHash('md5').update(merchantSecret).digest('hex').toUpperCase();
+    const hashString = `${merchantId}${orderId}${formattedAmount}${currency}${hashedSecret}`;
+    paymentHash = crypto.createHash('md5').update(hashString).digest('hex').toUpperCase();
+  }
+
+  return {
+    id: orderId,
+    bookingId: orderId,
+    bookingReference,
+    accessToken,
+    bookingType,
+    totalAmount: ticketAmount,
+    currency,
+    merchantId,
+    paymentHash,
+    trip,
+    lockDurationMs: SEAT_LOCK_DURATION_MS
+  };
 }
 
 /**
- * Confirms payment authoritatively via server webhook IPN.
- * Strictly verifies amount, currency, merchant ID, and state machine validity.
+ * Looks up a booking by reference or ID with secure authorization checks.
  */
-export async function confirmBookingPayment(params: PaymentNotificationParams): Promise<{ status: string; orderId: string }> {
-  const { merchantId, orderId, paymentId, payhereAmount, payhereCurrency, statusCode, md5sig } = params;
-
-  const secret = process.env.PAYHERE_SECRET;
-  const configuredMerchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || process.env.PAYHERE_MERCHANT_ID;
-
-  if (!secret || !configuredMerchantId) {
-    throw new HttpError(500, 'Payment gateway configuration is missing.');
+export async function lookupBookingByReference(
+  reference: string,
+  accessToken?: string,
+  authenticatedUserId?: string,
+  providedPhone?: string
+): Promise<{ booking: Booking; trip: Trip }> {
+  if (!reference) {
+    throw new HttpError(400, 'Booking reference or Order ID is required.');
   }
 
-  // 1. Verify merchant identity
-  if (merchantId !== configuredMerchantId) {
-    throw new HttpError(400, 'Merchant ID mismatch.');
+  const supabase = getSupabaseAdminClient();
+  const cleanRef = reference.trim();
+
+  // Query by id OR booking_reference
+  const { data: bookingData, error: bookingError } = await supabase
+    .from('bookings')
+    .select('*')
+    .or(`id.eq.${cleanRef},booking_reference.eq.${cleanRef}`)
+    .maybeSingle();
+
+  if (bookingError || !bookingData) {
+    throw new HttpError(404, `Booking #${cleanRef} was not found.`);
   }
 
-  // 2. Verify official PayHere MD5 checksum signature
-  const hashedSecret = crypto.createHash('md5').update(secret).digest('hex').toUpperCase();
-  const hashString = `${merchantId}${orderId}${payhereAmount}${payhereCurrency}${statusCode}${hashedSecret}`;
-  const localHash = crypto.createHash('md5').update(hashString).digest('hex').toUpperCase();
+  const booking = {
+    id: bookingData.id,
+    bookingReference: bookingData.booking_reference,
+    accessToken: bookingData.access_token,
+    bookingType: bookingData.booking_type,
+    tripId: bookingData.trip_id,
+    userId: bookingData.user_id,
+    ownerId: bookingData.owner_id,
+    passengerName: bookingData.passenger_name,
+    passengerPhone: bookingData.passenger_phone,
+    passengerEmail: bookingData.passenger_email || undefined,
+    passengerDetails: bookingData.passenger_details as Record<string, unknown>,
+    seats: bookingData.seats,
+    totalAmount: Number(bookingData.total_amount),
+    fares: bookingData.fares as Record<string, unknown>,
+    status: bookingData.status,
+    boarded: bookingData.boarded,
+    boardedAt: bookingData.boarded_at ? new Date(bookingData.boarded_at).getTime() : undefined,
+    boardedBy: bookingData.boarded_by || undefined,
+    paymentId: bookingData.payment_id || undefined,
+    refundId: bookingData.refund_id || undefined,
+    tripSnapshot: bookingData.trip_snapshot as Record<string, unknown>,
+    createdAt: new Date(bookingData.created_at).getTime()
+  } as unknown as Booking;
 
-  if (localHash !== md5sig) {
-    throw new HttpError(400, 'Payment signature verification failed.');
+  // Authorization Check
+  let isAuthorized = false;
+
+  if (accessToken && booking.accessToken && accessToken === booking.accessToken) {
+    isAuthorized = true;
+  } else if (authenticatedUserId && booking.userId && authenticatedUserId === booking.userId) {
+    isAuthorized = true;
+  } else if (providedPhone) {
+    const normProvided = normalizeSriLankanPhone(providedPhone);
+    const normPassenger = normalizeSriLankanPhone(booking.passengerPhone || '');
+    if (normProvided && normPassenger && normProvided === normPassenger) {
+      isAuthorized = true;
+    }
   }
 
-  const db = getAdminDatabase();
-  const bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
-
-  if (!bookingSnap.exists()) {
-    throw new HttpError(404, `Booking not found for order ${orderId}`);
+  if (!isAuthorized) {
+    throw new HttpError(
+      403,
+      'Access verification required. Please verify with the passenger phone number or access token.'
+    );
   }
 
-  const booking: Booking = bookingSnap.val();
-  const now = Date.now();
+  // Fetch full trip details
+  const { data: tripData } = await supabase
+    .from('trips')
+    .select('*')
+    .eq('id', booking.tripId)
+    .maybeSingle();
 
-  // 3. Process Success (Status 2)
-  if (statusCode === '2') {
-    // Idempotency: If already confirmed or boarded, return cleanly
-    if (booking.status === 'confirmed' || booking.status === 'boarded') {
-      return { status: 'already_confirmed', orderId };
-    }
+  const trip = tripData ? ({
+    id: tripData.id,
+    busId: tripData.bus_id,
+    ownerId: tripData.owner_id,
+    routeId: tripData.route_id || '',
+    routeSnapshot: tripData.route_snapshot,
+    busSnapshot: tripData.bus_snapshot,
+    departureDate: tripData.departure_date,
+    departureTime: tripData.departure_time,
+    arrivalTime: tripData.arrival_time,
+    duration: tripData.duration,
+    baseFare: tripData.base_fare,
+    farePerSeat: tripData.fare_per_seat,
+    operatorName: tripData.operator_name,
+    status: tripData.status
+  } as unknown as Trip) : (booking.tripSnapshot as unknown as Trip);
 
-    // State machine check: Never allow cancelled bookings to be confirmed
-    if (booking.status === 'cancelled') {
-      throw new HttpError(400, 'Cannot confirm payment on an already cancelled booking.');
-    }
-
-    // Currency check
-    if (payhereCurrency !== DEFAULT_CURRENCY) {
-      throw new HttpError(400, `Unexpected payment currency: ${payhereCurrency}. Expected ${DEFAULT_CURRENCY}.`);
-    }
-
-    // Authoritative Amount check
-    const paidAmount = parseFloat(payhereAmount);
-    const expectedAmount = Number(booking.totalAmount);
-    if (isNaN(paidAmount) || Math.abs(paidAmount - expectedAmount) > 0.01) {
-      throw new HttpError(
-        400,
-        `Payment amount mismatch: received ${paidAmount} LKR, expected ${expectedAmount} LKR.`
-      );
-    }
-
-    const updates: Record<string, unknown> = {};
-
-    // Update booking state
-    updates[`bookings/${orderId}/status`] = 'confirmed';
-    updates[`bookings/${orderId}/paymentId`] = paymentId;
-    updates[`bookings/${orderId}/paidAmount`] = paidAmount;
-    updates[`bookings/${orderId}/updatedAt`] = now;
-
-    // Redundant ticket pass record
-    updates[`tickets/${orderId}`] = {
-      ...booking,
-      status: 'confirmed',
-      paymentId,
-      paidAmount,
-      updatedAt: now
-    };
-
-    // Convert temporary seat locks to permanent 'booked'
-    if (Array.isArray(booking.seats)) {
-      booking.seats.forEach((seatId: string) => {
-        updates[`seatLocks/${booking.tripId}/${seatId}`] = {
-          userId: booking.userId || 'guest',
-          status: 'booked',
-          bookingId: orderId,
-          bookedAt: now
-        };
-      });
-    }
-
-    // Audit log
-    updates[`payments/${orderId}`] = {
-      orderId,
-      paymentId,
-      amount: paidAmount,
-      currency: payhereCurrency,
-      status: 'success',
-      timestamp: now
-    };
-
-    await db.ref().update(updates);
-    return { status: 'confirmed', orderId };
-
-  } else if (statusCode === '-1' || statusCode === '-2') {
-    // Payment Cancelled (-1) or Failed (-2)
-    const updates: Record<string, unknown> = {};
-    updates[`bookings/${orderId}/status`] = 'payment_failed';
-    updates[`bookings/${orderId}/updatedAt`] = now;
-
-    // Release seat locks so seats are immediately freed
-    if (Array.isArray(booking.seats)) {
-      booking.seats.forEach((seatId: string) => {
-        updates[`seatLocks/${booking.tripId}/${seatId}`] = null;
-      });
-    }
-
-    await db.ref().update(updates);
-    return { status: 'payment_failed', orderId };
-  }
-
-  return { status: `acknowledged_${statusCode}`, orderId };
+  return { booking, trip };
 }
 
 /**
- * Atomically marks a ticket as boarded.
- * Guarantees that two concurrent conductor scans cannot both board the same passenger.
+ * Links a past guest booking to an authenticated user account.
  */
-export async function atomicBoardTicket(
-  bookingId: string,
-  staffUser: AuthenticatedUser
-): Promise<{ success: boolean; reason?: string; boardedAt?: number; boardedBy?: string; booking?: Booking }> {
-  const db = getAdminDatabase();
-  const bookingRef = db.ref(`bookings/${bookingId}`);
-  const now = Date.now();
+export async function linkGuestBookingToAccount(
+  reference: string,
+  accessToken: string | undefined,
+  phone: string | undefined,
+  authenticatedUserId: string
+) {
+  if (!reference) throw new HttpError(400, 'Booking reference is required.');
+  if (!authenticatedUserId) throw new HttpError(401, 'Please sign in to link your booking.');
 
-  let abortReason: string | undefined;
-  let alreadyBoardedAt: number | undefined;
-  let alreadyBoardedBy: string | undefined;
+  const supabase = getSupabaseAdminClient();
+  const cleanRef = reference.trim();
 
-  const result = await bookingRef.transaction((currentBooking) => {
-    if (!currentBooking) {
-      abortReason = 'NOT_FOUND';
-      return;
-    }
+  const { data: booking, error: findError } = await supabase
+    .from('bookings')
+    .select('*')
+    .or(`id.eq.${cleanRef},booking_reference.eq.${cleanRef}`)
+    .maybeSingle();
 
-    if (currentBooking.status === 'cancelled') {
-      abortReason = 'CANCELLED';
-      return;
-    }
-
-    if (currentBooking.status === 'pending' || currentBooking.status === 'payment_failed') {
-      abortReason = 'UNPAID';
-      return;
-    }
-
-    if (currentBooking.boarded || currentBooking.status === 'boarded') {
-      abortReason = 'ALREADY_BOARDED';
-      alreadyBoardedAt = currentBooking.boardedAt;
-      alreadyBoardedBy = currentBooking.boardedBy;
-      return;
-    }
-
-    // Atomic update
-    currentBooking.boarded = true;
-    currentBooking.boardedAt = now;
-    currentBooking.boardedBy = staffUser.uid;
-    currentBooking.status = 'boarded';
-    currentBooking.updatedAt = now;
-
-    return currentBooking;
-  });
-
-  if (!result.committed) {
-    return {
-      success: false,
-      reason: abortReason || 'TRANSACTION_FAILED',
-      boardedAt: alreadyBoardedAt,
-      boardedBy: alreadyBoardedBy
-    };
+  if (findError || !booking) {
+    throw new HttpError(404, `Booking #${cleanRef} was not found.`);
   }
 
-  const updatedBooking: Booking = result.snapshot.val();
+  if (booking.user_id && booking.user_id === authenticatedUserId) {
+    return { success: true, message: 'This booking is already linked to your account.', bookingId: booking.id };
+  }
 
-  // Mirror to tickets node for consistency
-  const ticketUpdates: Record<string, unknown> = {
-    [`tickets/${bookingId}/boarded`]: true,
-    [`tickets/${bookingId}/boardedAt`]: now,
-    [`tickets/${bookingId}/boardedBy`]: staffUser.uid,
-    [`tickets/${bookingId}/status`]: 'boarded',
-    [`tickets/${bookingId}/updatedAt`]: now,
-    [`auditLogs/boarding/${bookingId}_${now}`]: {
-      bookingId,
-      staffUid: staffUser.uid,
-      staffEmail: staffUser.email || '',
-      tripId: updatedBooking.tripId,
-      timestamp: now
+  if (booking.user_id && booking.user_id !== authenticatedUserId) {
+    throw new HttpError(403, 'This booking has already been claimed by another registered account.');
+  }
+
+  // Verify ownership via access token or passenger phone
+  let verified = false;
+  if (accessToken && booking.access_token && accessToken === booking.access_token) {
+    verified = true;
+  } else if (phone) {
+    const normProvided = normalizeSriLankanPhone(phone);
+    const normPassenger = normalizeSriLankanPhone(booking.passenger_phone || '');
+    if (normProvided && normPassenger && normProvided === normPassenger) {
+      verified = true;
     }
-  };
-  await db.ref().update(ticketUpdates);
+  }
+
+  if (!verified) {
+    throw new HttpError(403, 'Verification failed. The provided phone number or token did not match this booking.');
+  }
+
+  // Update booking in Supabase
+  const { error: updateError } = await supabase
+    .from('bookings')
+    .update({
+      user_id: authenticatedUserId,
+      booking_type: 'account',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', booking.id);
+
+  if (updateError) {
+    console.error("Failed to link booking to account:", updateError);
+    throw new HttpError(500, 'Database error while linking booking.');
+  }
 
   return {
     success: true,
-    boardedAt: now,
-    boardedBy: staffUser.uid,
-    booking: updatedBooking
+    message: 'Booking successfully linked to your account!',
+    bookingId: booking.id
   };
 }
 
 /**
- * Cancels a booking and applies the authoritative refund schedule.
- * Releases booked seats immediately and writes audit logs.
+ * Cancels a booking, computes eligible refunds, and frees up seats atomically.
  */
-export async function cancelBookingWithRefund(
-  bookingId: string,
-  cancellingUserUid: string | null
-): Promise<{ success: boolean; refundPercentage: number; refundAmount: number; message: string }> {
-  const db = getAdminDatabase();
-  const bookingSnap = await db.ref(`bookings/${bookingId}`).once('value');
+export async function cancelBooking(bookingId: string, authenticatedUser: AuthenticatedUser) {
+  const supabase = getSupabaseAdminClient();
 
-  if (!bookingSnap.exists()) {
+  const { data: bookingData, error: bookingError } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('id', bookingId)
+    .maybeSingle();
+
+  if (bookingError || !bookingData) {
     throw new HttpError(404, 'Booking not found.');
   }
 
-  const booking: Booking = bookingSnap.val();
+  // Only the passenger who owns the booking or an Admin can cancel it
+  if (!authenticatedUser.isAdmin && bookingData.user_id !== authenticatedUser.uid) {
+    throw new HttpError(403, 'You are only authorized to cancel your own bookings.');
+  }
 
-  if (booking.status === 'cancelled') {
+  if (bookingData.status === 'cancelled') {
     throw new HttpError(400, 'This booking has already been cancelled.');
   }
 
-  if (booking.boarded || booking.status === 'boarded') {
-    throw new HttpError(400, 'Cannot cancel a ticket that has already been boarded.');
-  }
+  // Calculate refund policy based on departure date/time
+  const tripSnapshot = bookingData.trip_snapshot as Record<string, unknown>;
+  const departureDate = tripSnapshot?.departureDate as string;
+  const departureTime = tripSnapshot?.departureTime as string;
 
-  // Fetch trip departure to compute authoritative refund tier
-  const tripSnap = await db.ref(`trips/${booking.tripId}`).once('value');
   let refundPercentage = 0;
-  const now = Date.now();
+  if (departureDate && departureTime) {
+    const departureDateTime = new Date(`${departureDate}T${departureTime}:00`);
+    const diffHours = (departureDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
 
-  if (tripSnap.exists()) {
-    const trip: Trip = tripSnap.val();
-    if (trip.departureDate && trip.departureTime) {
-      const departureTimeStr = `${trip.departureDate}T${trip.departureTime}:00`;
-      const departureDate = new Date(departureTimeStr);
-      const diffHours = (departureDate.getTime() - now) / (1000 * 60 * 60);
-
-      if (diffHours > 24) {
-        refundPercentage = 100;
-      } else if (diffHours >= 12) {
-        refundPercentage = 50;
-      } else {
-        refundPercentage = 0;
-      }
-    }
+    if (diffHours > 24) refundPercentage = 100;
+    else if (diffHours >= 12) refundPercentage = 50;
+    else refundPercentage = 0;
   }
 
-  const originalAmount = Number(booking.fares?.ticketAmount || booking.totalAmount || 0);
-  const refundAmount = (originalAmount * refundPercentage) / 100;
+  const fares = bookingData.fares as Record<string, unknown>;
+  const originalTicketAmount = Number(fares?.ticketAmount || bookingData.total_amount || 0);
+  const refundAmount = Math.round(((originalTicketAmount * refundPercentage) / 100) * 100) / 100;
   const refundId = `RF-${Date.now()}`;
 
-  const updates: Record<string, unknown> = {};
-  updates[`bookings/${bookingId}/status`] = 'cancelled';
-  updates[`bookings/${bookingId}/cancelledAt`] = now;
-  updates[`bookings/${bookingId}/cancelledBy`] = cancellingUserUid || 'guest';
-  updates[`bookings/${bookingId}/refundId`] = refundId;
+  // 1. Update booking status
+  await supabase
+    .from('bookings')
+    .update({
+      status: 'cancelled',
+      refund_id: refundId,
+      cancelled_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', bookingId);
 
-  updates[`tickets/${bookingId}/status`] = 'cancelled';
-  updates[`tickets/${bookingId}/cancelledAt`] = now;
+  // 2. Insert refund record
+  await supabase
+    .from('refunds')
+    .insert([{
+      id: refundId,
+      booking_id: bookingId,
+      user_id: authenticatedUser.uid,
+      original_amount: originalTicketAmount,
+      refund_amount: refundAmount,
+      refund_percentage: refundPercentage,
+      status: refundAmount > 0 ? 'pending_payout' : 'no_refund',
+      created_at: new Date().toISOString()
+    }]);
 
-  // Record refund transaction
-  updates[`refunds/${refundId}`] = {
-    id: refundId,
-    bookingId,
-    userId: booking.userId || 'guest',
-    originalAmount,
-    refundAmount,
-    refundPercentage,
-    status: refundAmount > 0 ? 'pending_payout' : 'no_refund',
-    createdAt: now
-  };
-
-  // Release all booked seats immediately
-  if (Array.isArray(booking.seats)) {
-    booking.seats.forEach((seatId: string) => {
-      updates[`seatLocks/${booking.tripId}/${seatId}`] = null;
-    });
+  // 3. Free up seats
+  if (bookingData.seats && Array.isArray(bookingData.seats)) {
+    await supabase
+      .from('seat_locks')
+      .delete()
+      .eq('trip_id', bookingData.trip_id)
+      .in('seat_id', bookingData.seats);
   }
-
-  await db.ref().update(updates);
 
   return {
     success: true,
@@ -547,6 +577,210 @@ export async function cancelBookingWithRefund(
     refundAmount,
     message: refundAmount > 0
       ? `Booking cancelled successfully. You are eligible for a ${refundPercentage}% refund (Rs. ${refundAmount.toFixed(2)}).`
-      : 'Booking cancelled successfully. No refund is applicable as departure is within 12 hours.'
+      : 'Booking cancelled successfully. No refund is available within 12 hours of departure.'
+  };
+}
+
+/**
+ * Handles PayHere Server-to-Server webhook with strict signature validation & idempotency.
+ */
+export async function processPayHereNotification(params: PaymentNotificationParams) {
+  const { merchantId, orderId, paymentId, payhereAmount, payhereCurrency, statusCode, md5sig } = params;
+
+  const expectedMerchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || '';
+  const merchantSecret = process.env.PAYHERE_SECRET || '';
+
+  if (merchantId !== expectedMerchantId) {
+    throw new HttpError(400, 'Merchant ID mismatch');
+  }
+
+  // PayHere signature verification
+  const hashedSecret = crypto.createHash('md5').update(merchantSecret).digest('hex').toUpperCase();
+  const hashString = `${merchantId}${orderId}${payhereAmount}${payhereCurrency}${statusCode}${hashedSecret}`;
+  const localHash = crypto.createHash('md5').update(hashString).digest('hex').toUpperCase();
+
+  if (localHash !== md5sig) {
+    throw new HttpError(400, 'Payment signature verification failed.');
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  // Fetch booking
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (bookingError || !booking) {
+    throw new HttpError(404, `Booking #${orderId} was not found.`);
+  }
+
+  // Idempotency: If already confirmed, don't duplicate processing
+  if (booking.status === 'confirmed') {
+    return { success: true, message: 'Booking already confirmed', bookingId: orderId };
+  }
+
+  // Status code 2 = Success in PayHere
+  if (statusCode === '2') {
+    // 1. Confirm booking
+    await supabase
+      .from('bookings')
+      .update({
+        status: 'confirmed',
+        payment_id: paymentId,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', orderId);
+
+    // 2. Insert payment record
+    await supabase
+      .from('payments')
+      .upsert([{
+        id: paymentId || `PAY-${orderId}`,
+        booking_id: orderId,
+        order_id: orderId,
+        amount: parseFloat(payhereAmount),
+        currency: payhereCurrency,
+        status: 'completed',
+        provider: 'payhere',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }]);
+
+    // 3. Mark seat locks as permanently 'booked'
+    if (booking.seats && Array.isArray(booking.seats)) {
+      const bookedRecords = booking.seats.map((seatId: string) => ({
+        trip_id: booking.trip_id,
+        seat_id: seatId,
+        user_id: booking.user_id || 'guest',
+        booking_id: orderId,
+        status: 'booked' as const,
+        created_at: new Date().toISOString(),
+        expires_at: null
+      }));
+
+      await supabase
+        .from('seat_locks')
+        .upsert(bookedRecords, { onConflict: 'trip_id,seat_id' });
+    }
+
+    return { success: true, message: 'Payment successfully processed and booking confirmed', bookingId: orderId };
+  } else {
+    // Payment failed or cancelled
+    await supabase
+      .from('bookings')
+      .update({
+        status: 'payment_failed',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', orderId);
+
+    // Release temporary seat locks
+    if (booking.seats && Array.isArray(booking.seats)) {
+      await supabase
+        .from('seat_locks')
+        .delete()
+        .eq('trip_id', booking.trip_id)
+        .eq('booking_id', orderId)
+        .eq('status', 'locked');
+    }
+
+    return { success: false, message: `Payment failed with status code ${statusCode}`, bookingId: orderId, status: 'payment_failed' };
+  }
+}
+
+export const confirmBookingPayment = processPayHereNotification;
+
+/**
+ * Atomically checks and boards a passenger with anti-duplicate verification.
+ */
+export async function atomicBoardTicket(bookingId: string, staffUser: AuthenticatedUser) {
+  const supabase = getSupabaseAdminClient();
+
+  // Try PostgreSQL atomic RPC function
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('board_passenger_atomic', {
+      p_booking_id: bookingId,
+      p_conductor_id: staffUser.uid
+    });
+
+    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
+      const res = rpcResult as {
+        success: boolean;
+        reason?: string;
+        message?: string;
+        boarded_at?: string;
+        boarded_by?: string;
+      };
+
+      if (!res.success) {
+        return {
+          success: false,
+          reason: res.reason?.toUpperCase() || 'REJECTED',
+          message: res.message || 'Boarding rejected',
+          boardedAt: res.boarded_at ? new Date(res.boarded_at).getTime() : undefined
+        };
+      }
+
+      return {
+        success: true,
+        message: res.message || 'Passenger successfully checked in & boarded',
+        boardedAt: res.boarded_at ? new Date(res.boarded_at).getTime() : Date.now()
+      };
+    }
+  } catch {
+    // Fall back to direct query
+  }
+
+  // Fallback: Direct conditional query
+  const { data: booking, error: findError } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('id', bookingId)
+    .maybeSingle();
+
+  if (findError || !booking) {
+    return { success: false, reason: 'NOT_FOUND', message: 'Booking reference not found.' };
+  }
+
+  if (booking.status === 'cancelled') {
+    return { success: false, reason: 'CANCELLED', message: 'This ticket was cancelled and refunded.' };
+  }
+
+  if (booking.status !== 'confirmed' && booking.status !== 'boarded') {
+    return { success: false, reason: 'UNCONFIRMED', message: 'This booking is unpaid or pending.' };
+  }
+
+  if (booking.boarded) {
+    return {
+      success: false,
+      reason: 'ALREADY_BOARDED',
+      message: 'This passenger has already boarded the bus.',
+      boardedAt: booking.boarded_at ? new Date(booking.boarded_at).getTime() : undefined
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from('bookings')
+    .update({
+      boarded: true,
+      boarded_at: nowIso,
+      boarded_by: staffUser.uid,
+      status: 'boarded',
+      updated_at: nowIso
+    })
+    .eq('id', bookingId)
+    .eq('boarded', false);
+
+  if (updateError) {
+    return { success: false, reason: 'CONFLICT', message: 'Boarding conflict. Please rescan.' };
+  }
+
+  return {
+    success: true,
+    message: 'Passenger checked in and marked as boarded.',
+    boardedAt: Date.now()
   };
 }

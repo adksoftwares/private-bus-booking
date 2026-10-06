@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from '@/i18n/routing';
 import { useSearchParams } from 'next/navigation';
-import { ref, get, child } from 'firebase/database';
-import { db } from '@/lib/firebase';
 import Header from '@/components/shared/Header';
 import { Booking } from '@/types/booking';
 import { 
@@ -64,36 +62,26 @@ export default function PaymentPage() {
           return;
         }
 
-        // Try lookup endpoint first (authoritative server verification)
-        try {
-          const res = await authFetch('/api/bookings/lookup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              bookingId: orderId,
-              accessToken: accessToken || undefined
-            })
-          });
+        // Authoritative server verification
+        const res = await authFetch('/api/bookings/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookingId: orderId,
+            accessToken: accessToken || undefined
+          })
+        });
 
-          if (res.ok) {
-            const data = await res.json();
-            if (data.booking) {
-              setBooking(data.booking);
-              setInitializing(false);
-              return;
-            }
+        if (res.ok) {
+          const data = await res.json();
+          if (data.booking) {
+            setBooking(data.booking);
+            setInitializing(false);
+            return;
           }
-        } catch {
-          // fallback to client database
         }
 
-        // Fallback to client RTDB
-        const bookingSnap = await get(child(ref(db), `bookings/${orderId}`));
-        if (bookingSnap.exists()) {
-          setBooking(bookingSnap.val());
-        } else {
-          setError("Booking reservation not found or expired.");
-        }
+        setError("Booking reservation not found or expired.");
       } catch (err: unknown) {
         console.error("Error loading booking for payment:", err);
         setError("Failed to load booking details.");

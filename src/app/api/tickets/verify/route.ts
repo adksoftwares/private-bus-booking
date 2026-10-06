@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getAdminDatabase } from '@/lib/serverFirebase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireStaffOrAdmin } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { verifyTicketSchema, formatZodError } from '@/lib/validation/schemas';
 import { atomicBoardTicket } from '@/lib/services/booking-service';
-import { Booking } from '@/types/booking';
 
 export async function POST(req: Request) {
   try {
@@ -26,20 +25,26 @@ export async function POST(req: Request) {
 
     const { bookingId: rawId, action } = parseResult.data;
     const cleanId = rawId.trim();
-    const db = getAdminDatabase();
+    const supabase = getSupabaseAdminClient();
 
-    // 4. Resolve Order ID from Reference if needed (e.g. "SLB-AB12CD")
-    let orderId = cleanId;
-    if (cleanId.toUpperCase().startsWith('SLB-')) {
-      const refSnap = await db.ref(`indexes/bookingReferences/${cleanId.toUpperCase()}`).once('value');
-      if (refSnap.exists()) {
-        orderId = refSnap.val();
-      }
+    // 4. Resolve Booking by ID or Reference
+    const { data: booking, error: findError } = await supabase
+      .from('bookings')
+      .select('*')
+      .or(`id.eq.${cleanId},booking_reference.eq.${cleanId}`)
+      .maybeSingle();
+
+    if (findError || !booking) {
+      return NextResponse.json({
+        valid: false,
+        reason: 'NOT_FOUND',
+        message: 'Invalid Ticket — No booking record found for this reference.'
+      }, { status: 404 });
     }
 
     // 5. If action is 'board', execute atomic single-use boarding transaction
     if (action === 'board') {
-      const boardResult = await atomicBoardTicket(orderId, staffUser);
+      const boardResult = await atomicBoardTicket(booking.id, staffUser);
 
       if (!boardResult.success) {
         if (boardResult.reason === 'NOT_FOUND') {
@@ -58,7 +63,7 @@ export async function POST(req: Request) {
           }, { status: 400 });
         }
 
-        if (boardResult.reason === 'UNPAID') {
+        if (boardResult.reason === 'UNCONFIRMED') {
           return NextResponse.json({
             valid: false,
             reason: 'UNPAID',
@@ -72,8 +77,7 @@ export async function POST(req: Request) {
             valid: false,
             reason: 'ALREADY_BOARDED',
             message: `Ticket Already Used — This passenger was already boarded at ${boardedTime}. Duplicate boarding is rejected!`,
-            boardedAt: boardResult.boardedAt,
-            boardedBy: boardResult.boardedBy
+            boardedAt: boardResult.boardedAt
           }, { status: 409 });
         }
 
@@ -85,48 +89,61 @@ export async function POST(req: Request) {
       }
 
       // Fetch trip details for display
-      let trip = null;
-      if (boardResult.booking?.tripId) {
-        const tripSnap = await db.ref(`trips/${boardResult.booking.tripId}`).once('value');
-        if (tripSnap.exists()) {
-          trip = tripSnap.val();
-        }
-      }
+      const { data: tripData } = await supabase
+        .from('trips')
+        .select('*')
+        .eq('id', booking.trip_id)
+        .maybeSingle();
+
+      const trip = tripData ? {
+        id: tripData.id,
+        routeSnapshot: tripData.route_snapshot,
+        busSnapshot: tripData.bus_snapshot,
+        departureDate: tripData.departure_date,
+        departureTime: tripData.departure_time
+      } : booking.trip_snapshot;
 
       return NextResponse.json({
         valid: true,
         canBoard: false,
         boarded: true,
         message: 'Boarding Confirmed — Passenger marked as boarded successfully.',
-        booking: boardResult.booking,
+        booking: {
+          id: booking.id,
+          passengerName: booking.passenger_name,
+          passengerPhone: booking.passenger_phone,
+          seats: booking.seats,
+          status: 'boarded',
+          totalAmount: booking.total_amount
+        },
         trip
       });
     }
 
     // 6. Action is 'lookup' (read-only verification check)
-    let bookingSnap = await db.ref(`bookings/${orderId}`).once('value');
-    if (!bookingSnap.exists()) {
-      bookingSnap = await db.ref(`tickets/${orderId}`).once('value');
-    }
-
-    if (!bookingSnap.exists()) {
-      return NextResponse.json({
-        valid: false,
-        reason: 'NOT_FOUND',
-        message: 'Invalid Ticket — No booking found with this reference ID.'
-      }, { status: 404 });
-    }
-
-    const booking: Booking = bookingSnap.val();
-
     // Fetch trip details for display
-    let trip = null;
-    if (booking.tripId) {
-      const tripSnap = await db.ref(`trips/${booking.tripId}`).once('value');
-      if (tripSnap.exists()) {
-        trip = tripSnap.val();
-      }
-    }
+    const { data: tripData } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('id', booking.trip_id)
+      .maybeSingle();
+
+    const trip = tripData ? {
+      id: tripData.id,
+      routeSnapshot: tripData.route_snapshot,
+      busSnapshot: tripData.bus_snapshot,
+      departureDate: tripData.departure_date,
+      departureTime: tripData.departure_time
+    } : booking.trip_snapshot;
+
+    const formattedBooking = {
+      id: booking.id,
+      passengerName: booking.passenger_name,
+      passengerPhone: booking.passenger_phone,
+      seats: booking.seats,
+      status: booking.status,
+      totalAmount: booking.total_amount
+    };
 
     // Check status
     if (booking.status === 'cancelled') {
@@ -134,7 +151,7 @@ export async function POST(req: Request) {
         valid: false,
         reason: 'CANCELLED',
         message: 'Ticket Rejected — This booking was CANCELLED.',
-        booking,
+        booking: formattedBooking,
         trip
       });
     }
@@ -144,19 +161,19 @@ export async function POST(req: Request) {
         valid: false,
         reason: 'UNPAID',
         message: 'Ticket Rejected — Payment has NOT been confirmed for this booking.',
-        booking,
+        booking: formattedBooking,
         trip
       });
     }
 
     if (booking.boarded || booking.status === 'boarded') {
-      const boardedTime = booking.boardedAt ? new Date(booking.boardedAt).toLocaleTimeString() : 'Earlier';
+      const boardedTime = booking.boarded_at ? new Date(booking.boarded_at).toLocaleTimeString() : 'Earlier';
       return NextResponse.json({
         valid: false,
         reason: 'ALREADY_BOARDED',
         message: `Ticket Already Used — This passenger was boarded at ${boardedTime}. Duplicate boarding is prohibited!`,
-        boardedAt: booking.boardedAt,
-        booking,
+        boardedAt: booking.boarded_at ? new Date(booking.boarded_at).getTime() : undefined,
+        booking: formattedBooking,
         trip
       });
     }
@@ -167,7 +184,7 @@ export async function POST(req: Request) {
       canBoard: true,
       boarded: false,
       message: 'Valid Ticket — Passenger is cleared for boarding.',
-      booking,
+      booking: formattedBooking,
       trip
     });
 

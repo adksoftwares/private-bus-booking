@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 export default function Header() {
-  const { user, isStaff, isOwner, isAdmin, role } = useAuth();
+  const { user, isStaff, isOwner, isAdmin, role, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const currentLocale = useLocale();
@@ -51,8 +51,11 @@ export default function Header() {
   };
 
   const handleSignOut = async () => {
-    const { getAuth, signOut } = await import('firebase/auth');
-    await signOut(getAuth());
+    try {
+      await signOut();
+    } catch (e) {
+      console.error("Sign out error:", e);
+    }
     setIsProfileOpen(false);
     setIsMobileMenuOpen(false);
     router.push('/');

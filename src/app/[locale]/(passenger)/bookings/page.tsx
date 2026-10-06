@@ -1,12 +1,27 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { ref, get, child } from 'firebase/database';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter, Link } from '@/i18n/routing';
 import { Booking } from '@/types/booking';
-import { Search, Link as LinkIcon, KeyRound, LogIn } from 'lucide-react';
+import { 
+  Search, 
+  Link as LinkIcon, 
+  KeyRound, 
+  LogIn, 
+  Calendar, 
+  Clock, 
+  ArrowRight, 
+  Plus, 
+  Ticket as TicketIcon,
+  AlertCircle,
+  CheckCircle2,
+  X,
+  Bus as BusIcon,
+  Phone
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 export default function PassengerBookingsPage() {
@@ -31,7 +46,7 @@ export default function PassengerBookingsPage() {
   const [linking, setLinking] = useState(false);
   const [linkModalError, setLinkModalError] = useState('');
 
-  const loadUserBookings = async (uid: string) => {
+  const loadUserBookings = useCallback(async (uid: string) => {
     setBookingsLoading(true);
     try {
       const userBookingsRef = ref(db, `indexes/userBookings/${uid}`);
@@ -57,7 +72,7 @@ export default function PassengerBookingsPage() {
     } finally {
       setBookingsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -76,7 +91,7 @@ export default function PassengerBookingsPage() {
     return () => {
       isMounted = false;
     };
-  }, [user?.uid]);
+  }, [user?.uid, loadUserBookings]);
 
   const handleGuestLookup = (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,9 +182,10 @@ export default function PassengerBookingsPage() {
 
   if (authLoading || (user && bookingsLoading)) {
     return (
-      <div className="min-h-[50vh] flex flex-col items-center justify-center">
-        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-600 font-medium">Loading your booking history...</p>
+      <div className="min-h-[50vh] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-700 font-bold text-base">Loading your booking history...</p>
+        <p className="text-slate-400 text-xs mt-1">Retrieving confirmed reservations</p>
       </div>
     );
   }
@@ -178,26 +194,27 @@ export default function PassengerBookingsPage() {
   if (!user) {
     return (
       <div className="max-w-xl mx-auto p-4 py-12">
-        <div className="bg-white p-8 border border-slate-200 rounded-3xl shadow-xl">
-          <div className="text-center mb-6">
-            <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <KeyRound className="w-6 h-6" />
+        <div className="bg-white p-6 sm:p-10 border border-slate-200 rounded-3xl shadow-xl">
+          <div className="text-center mb-8">
+            <div className="w-14 h-14 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-2xs">
+              <KeyRound className="w-7 h-7" />
             </div>
-            <h1 className="text-2xl font-black text-slate-800">{t('findTicket')}</h1>
-            <p className="text-slate-500 text-xs mt-1">
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">{t('findTicket')}</h1>
+            <p className="text-slate-500 text-xs sm:text-sm mt-1.5 max-w-sm mx-auto leading-relaxed">
               {t('guestLookupDesc')}
             </p>
           </div>
 
           {guestLookupError && (
-            <div className="p-3 mb-4 text-xs font-semibold bg-red-50 text-red-700 border border-red-200 rounded-xl">
-              {guestLookupError}
+            <div className="p-3.5 mb-6 text-xs font-semibold bg-red-50 text-red-700 border border-red-200 rounded-xl flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{guestLookupError}</span>
             </div>
           )}
 
           <form onSubmit={handleGuestLookup} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Booking Reference or Order ID *
               </label>
               <input 
@@ -206,27 +223,33 @@ export default function PassengerBookingsPage() {
                 placeholder={t('referencePlaceholder')}
                 value={guestRefInput}
                 onChange={e => setGuestRefInput(e.target.value)}
-                className="w-full p-3 border border-slate-300 rounded-xl font-mono text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 uppercase"
+                className="w-full p-3.5 border border-slate-300 rounded-xl font-mono text-sm uppercase tracking-wider outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition"
               />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Found in your booking confirmation SMS or receipt (e.g. SLB-7K9M-3P2W)
+              </p>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Passenger Phone Number *
               </label>
-              <input 
-                type="tel"
-                required
-                placeholder={t('phonePlaceholder')}
-                value={guestPhoneInput}
-                onChange={e => setGuestPhoneInput(e.target.value)}
-                className="w-full p-3 border border-slate-300 rounded-xl font-mono text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200"
-              />
+              <div className="relative">
+                <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input 
+                  type="tel"
+                  required
+                  placeholder={t('phonePlaceholder')}
+                  value={guestPhoneInput}
+                  onChange={e => setGuestPhoneInput(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3.5 border border-slate-300 rounded-xl font-mono text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition"
+                />
+              </div>
             </div>
 
             <button
               type="submit"
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3.5 rounded-xl transition shadow-md cursor-pointer flex items-center justify-center gap-2 text-sm"
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3.5 rounded-xl transition shadow-md hover:shadow-lg active:scale-95 cursor-pointer flex items-center justify-center gap-2 text-sm mt-2"
             >
               <Search className="w-4 h-4" />
               <span>{t('findViewTicket')}</span>
@@ -237,7 +260,7 @@ export default function PassengerBookingsPage() {
             <p className="text-xs text-slate-500 mb-3">{t('haveAccount')}</p>
             <Link
               href="/login?redirect=/bookings"
-              className="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-5 py-2.5 rounded-xl transition"
+              className="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-5 py-2.5 rounded-xl transition shadow-2xs"
             >
               <LogIn className="w-3.5 h-3.5" />
               <span>Sign In to View All Account Bookings</span>
@@ -248,6 +271,9 @@ export default function PassengerBookingsPage() {
     );
   }
 
+  const confirmedCount = bookings.filter(b => b.status === 'confirmed' || b.status === 'boarded').length;
+  const cancelledCount = bookings.filter(b => b.status === 'cancelled').length;
+
   const filteredBookings = bookings.filter(b => {
     if (filterTab === 'all') return true;
     if (filterTab === 'confirmed') return b.status === 'confirmed' || b.status === 'boarded';
@@ -256,11 +282,13 @@ export default function PassengerBookingsPage() {
   });
 
   return (
-    <div className="max-w-5xl mx-auto p-4 py-10">
+    <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 py-8 sm:py-10">
+      
+      {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-black text-slate-800">{t('title')}</h1>
-          <p className="text-slate-500 text-sm mt-1">{t('subtitle')}</p>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">{t('title')}</h1>
+          <p className="text-slate-500 text-xs sm:text-sm mt-1">{t('subtitle')}</p>
         </div>
         <div className="flex items-center gap-2.5">
           <button
@@ -273,50 +301,57 @@ export default function PassengerBookingsPage() {
           </button>
           <Link 
             href="/" 
-            className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition shadow-sm"
+            className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition shadow-sm hover:shadow"
           >
-            <span>+</span> {t('bookNewTrip')}
+            <Plus className="w-3.5 h-3.5" />
+            <span>{t('bookNewTrip')}</span>
           </Link>
         </div>
       </div>
 
       {notice && (
-        <div className={`p-4 rounded-xl mb-6 text-sm font-medium border flex items-center justify-between ${notice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
-          <span>{notice.message}</span>
-          <button onClick={() => setNotice(null)} className="text-xs font-bold cursor-pointer">✕</button>
+        <div className={`p-4 rounded-2xl mb-6 text-xs sm:text-sm font-semibold border flex items-center justify-between shadow-2xs ${notice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
+          <div className="flex items-center gap-2">
+            {notice.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
+            <span>{notice.message}</span>
+          </div>
+          <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
       {/* Account Linking Modal */}
       {showLinkModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white max-w-md w-full p-6 rounded-3xl shadow-2xl border border-slate-200">
-            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
-              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white max-w-md w-full p-6 sm:p-8 rounded-3xl shadow-2xl border border-slate-200">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
                 <LinkIcon className="w-4 h-4 text-orange-600" />
                 {t('linkModalTitle')}
               </h3>
               <button 
                 onClick={() => setShowLinkModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer font-bold"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+            <p className="text-xs text-slate-500 mb-5 leading-relaxed">
               {t('linkModalDesc')}
             </p>
 
             {linkModalError && (
-              <div className="p-3 mb-4 text-xs font-semibold bg-red-50 text-red-700 border border-red-200 rounded-xl">
-                {linkModalError}
+              <div className="p-3 mb-4 text-xs font-semibold bg-red-50 text-red-700 border border-red-200 rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{linkModalError}</span>
               </div>
             )}
 
-            <form onSubmit={handleLinkGuestBooking} className="space-y-3.5">
+            <form onSubmit={handleLinkGuestBooking} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                   Booking Reference or ID *
                 </label>
                 <input 
@@ -325,12 +360,12 @@ export default function PassengerBookingsPage() {
                   placeholder="e.g. SLB-7K9M-3P2W"
                   value={linkRefInput}
                   onChange={e => setLinkRefInput(e.target.value)}
-                  className="w-full p-2.5 border border-slate-300 rounded-xl font-mono text-sm outline-none focus:border-orange-500 uppercase"
+                  className="w-full p-3 border border-slate-300 rounded-xl font-mono text-sm uppercase tracking-wider outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                   Passenger Mobile Phone *
                 </label>
                 <input 
@@ -339,22 +374,22 @@ export default function PassengerBookingsPage() {
                   placeholder={t('phonePlaceholder')}
                   value={linkPhoneInput}
                   onChange={e => setLinkPhoneInput(e.target.value)}
-                  className="w-full p-2.5 border border-slate-300 rounded-xl font-mono text-sm outline-none focus:border-orange-500"
+                  className="w-full p-3 border border-slate-300 rounded-xl font-mono text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowLinkModal(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-50 cursor-pointer"
+                  className="px-4 py-2.5 border border-slate-200 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-50 cursor-pointer transition"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={linking}
-                  className="px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
+                  className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {linking ? 'Linking...' : t('linkNow')}
                 </button>
@@ -364,58 +399,61 @@ export default function PassengerBookingsPage() {
         </div>
       )}
 
-      {/* Filter Tabs */}
+      {/* Segmented Filter Tabs */}
       <div className="flex gap-2 mb-6 border-b border-slate-200 pb-2">
         <button
           onClick={() => setFilterTab('all')}
-          className={`px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer ${filterTab === 'all' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition cursor-pointer ${filterTab === 'all' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}
         >
           {t('tabAll')} ({bookings.length})
         </button>
         <button
           onClick={() => setFilterTab('confirmed')}
-          className={`px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer ${filterTab === 'confirmed' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition cursor-pointer ${filterTab === 'confirmed' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          {t('tabConfirmed')} ({bookings.filter(b => b.status === 'confirmed' || b.status === 'boarded').length})
+          {t('tabConfirmed')} ({confirmedCount})
         </button>
         <button
           onClick={() => setFilterTab('cancelled')}
-          className={`px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer ${filterTab === 'cancelled' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition cursor-pointer ${filterTab === 'cancelled' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          {t('tabCancelled')} ({bookings.filter(b => b.status === 'cancelled').length})
+          {t('tabCancelled')} ({cancelledCount})
         </button>
       </div>
       
+      {/* Booking List */}
       {filteredBookings.length === 0 ? (
-        <div className="p-16 text-center bg-white border border-slate-200 rounded-3xl shadow-sm">
-          <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
-            🎫
+        <div className="p-16 text-center bg-white border border-slate-200 rounded-3xl shadow-xs">
+          <div className="w-14 h-14 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-2xs">
+            <TicketIcon className="w-7 h-7" />
           </div>
-          <p className="text-slate-700 font-bold text-lg mb-1">{t('emptyTitle')}</p>
-          <p className="text-slate-400 text-sm mb-6">{t('emptyDesc')}</p>
+          <p className="text-slate-800 font-black text-lg mb-1">{t('emptyTitle')}</p>
+          <p className="text-slate-400 text-xs sm:text-sm mb-6 max-w-sm mx-auto">{t('emptyDesc')}</p>
           <button 
             onClick={() => router.push('/')} 
-            className="bg-orange-600 text-white font-bold px-6 py-2.5 rounded-xl hover:bg-orange-700 transition cursor-pointer"
+            className="bg-orange-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-orange-700 transition cursor-pointer text-sm shadow-md"
           >
             {t('bookNewTrip')}
           </button>
         </div>
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-4 sm:gap-5">
           {filteredBookings.map((booking) => {
             const isConfirmed = booking.status === 'confirmed';
             const isBoarded = booking.status === 'boarded' || booking.boarded;
             const isCancelled = booking.status === 'cancelled';
             const displayRef = booking.bookingReference || booking.id;
+            const busRegNumber = booking.tripSnapshot?.busSnapshot?.regNumber;
 
             return (
               <div 
                 key={booking.id} 
-                className="bg-white p-6 border border-slate-200 rounded-3xl shadow-sm hover:shadow-md transition flex flex-col md:flex-row justify-between md:items-center gap-6"
+                className="bg-white p-5 sm:p-6 border border-slate-200/90 rounded-3xl shadow-xs hover:shadow-md transition flex flex-col md:flex-row justify-between md:items-center gap-6"
               >
                 <div className="flex-1">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <span className="font-mono text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-md border border-slate-200">
+                  {/* Top Meta Chips */}
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2.5 py-0.5 rounded-lg border border-slate-200">
                       {displayRef}
                     </span>
                     <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full uppercase tracking-wider ${
@@ -434,29 +472,68 @@ export default function PassengerBookingsPage() {
                         Guest
                       </span>
                     )}
+                    {busRegNumber && (
+                      <span className="font-mono text-[10px] font-black bg-amber-300 text-slate-950 px-2 py-0.5 rounded border border-slate-900 shadow-2xs select-none">
+                        {busRegNumber}
+                      </span>
+                    )}
                   </div>
 
-                  <h3 className="text-lg font-bold text-slate-800 mb-1">
-                    {booking.tripSnapshot?.routeSnapshot?.startCity || 'Origin'} &rarr; {booking.tripSnapshot?.routeSnapshot?.endCity || 'Destination'}
-                  </h3>
+                  {/* Route Origin &rarr; Destination */}
+                  <div className="flex items-center gap-2 font-black text-lg text-slate-800 mb-1">
+                    <span>{booking.tripSnapshot?.routeSnapshot?.startCity || 'Origin'}</span>
+                    <ArrowRight className="w-4 h-4 text-orange-500" />
+                    <span>{booking.tripSnapshot?.routeSnapshot?.endCity || 'Destination'}</span>
+                  </div>
 
-                  <p className="text-sm text-slate-500 mb-3">
-                    {booking.tripSnapshot?.busSnapshot?.name || 'Express Bus'} • {booking.tripSnapshot?.departureDate} at {booking.tripSnapshot?.departureTime}
-                  </p>
+                  {/* Bus & Schedule info */}
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mb-3 font-medium">
+                    <span className="flex items-center gap-1 text-slate-700 font-semibold">
+                      <BusIcon className="w-3.5 h-3.5 text-orange-600" />
+                      {booking.tripSnapshot?.busSnapshot?.name || 'Express Bus'}
+                    </span>
+                    <span>&bull;</span>
+                    <span className="flex items-center gap-1 text-slate-700">
+                      <Calendar className="w-3.5 h-3.5 text-orange-500" />
+                      {booking.tripSnapshot?.departureDate}
+                    </span>
+                    <span>&bull;</span>
+                    <span className="flex items-center gap-1 text-slate-700">
+                      <Clock className="w-3.5 h-3.5 text-orange-500" />
+                      {booking.tripSnapshot?.departureTime}
+                    </span>
+                  </div>
 
-                  <div className="flex flex-wrap gap-y-1 gap-x-4 text-xs text-slate-600">
-                    <span><strong>Seats:</strong> {booking.seats?.join(', ')}</span>
-                    <span>•</span>
-                    <span><strong>Passenger:</strong> {booking.passengerName}</span>
-                    <span>•</span>
-                    <span><strong>Total:</strong> Rs. {Number(booking.totalAmount).toFixed(2)}</span>
+                  {/* Seats, Passenger, Fare Details */}
+                  <div className="flex flex-wrap items-center gap-y-1.5 gap-x-4 text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-medium">Seats:</span>
+                      <div className="flex gap-1">
+                        {(booking.seats || []).map((s: string) => (
+                          <span key={s} className="px-1.5 py-0.5 bg-orange-100 text-orange-700 font-black rounded text-[11px]">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <span>&bull;</span>
+                    <div>
+                      <span className="text-slate-400 font-medium">Passenger: </span>
+                      <strong className="text-slate-700">{booking.passengerName}</strong>
+                    </div>
+                    <span>&bull;</span>
+                    <div>
+                      <span className="text-slate-400 font-medium">Total: </span>
+                      <strong className="text-slate-900 font-bold">Rs. {Number(booking.totalAmount).toFixed(2)}</strong>
+                    </div>
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-3 border-t md:border-t-0 pt-4 md:pt-0">
+                {/* Actions */}
+                <div className="flex items-center gap-2.5 border-t md:border-t-0 pt-4 md:pt-0">
                   <button 
                     onClick={() => router.push(`/ticket/${booking.id}`)}
-                    className="px-5 py-2.5 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-xl transition font-bold text-sm cursor-pointer"
+                    className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl transition font-bold text-xs sm:text-sm cursor-pointer shadow-xs hover:shadow"
                   >
                     {t('viewETicket')}
                   </button>
@@ -465,7 +542,7 @@ export default function PassengerBookingsPage() {
                     <button 
                       onClick={() => handleCancel(booking)}
                       disabled={cancellingId === booking.id}
-                      className="px-4 py-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl transition font-semibold text-sm cursor-pointer disabled:opacity-50"
+                      className="px-4 py-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl transition font-semibold text-xs sm:text-sm cursor-pointer disabled:opacity-50"
                     >
                       {cancellingId === booking.id ? 'Processing...' : t('cancel')}
                     </button>

@@ -6,14 +6,26 @@ import { useRouter } from '@/i18n/routing';
 import { useSearchParams } from 'next/navigation';
 import { ref, get, child } from 'firebase/database';
 import { db } from '@/lib/firebase';
-import Image from 'next/image';
+import Header from '@/components/shared/Header';
 import { Booking } from '@/types/booking';
+import { 
+  ShieldCheck, 
+  Lock, 
+  Bus as BusIcon, 
+  Calendar, 
+  Clock, 
+  CreditCard, 
+  ArrowRight,
+  AlertCircle
+} from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 export default function PaymentPage() {
   const { user, authFetch } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
+  const t = useTranslations('payment');
 
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,7 +64,7 @@ export default function PaymentPage() {
           return;
         }
 
-        // Try lookup endpoint first (handles guest with accessToken and account users)
+        // Try lookup endpoint first (authoritative server verification)
         try {
           const res = await authFetch('/api/bookings/lookup', {
             method: 'POST',
@@ -93,7 +105,9 @@ export default function PaymentPage() {
     loadBooking();
 
     return () => {
-      document.body.removeChild(script);
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
     };
   }, [urlOrderId, searchParams, router, authFetch]);
 
@@ -146,7 +160,7 @@ export default function PaymentPage() {
         custom_1: booking.id
       };
 
-      // 3. Register client event listeners
+      // 3. Register client event listeners on PayHere SDK
       if (typeof window !== 'undefined' && window.payhere) {
         window.payhere.onCompleted = function onCompleted() {
           sessionStorage.removeItem('bookingDraft');
@@ -159,7 +173,7 @@ export default function PaymentPage() {
 
         window.payhere.onError = function onError(payhereError: unknown) {
           console.error("PayHere SDK error:", payhereError);
-          setError(typeof payhereError === 'string' ? payhereError : 'Payment process was interrupted. Please try again.');
+          setError(typeof payhereError === 'string' ? payhereError : 'Payment process was interrupted. Please retry.');
           setLoading(false);
         };
 
@@ -170,149 +184,202 @@ export default function PaymentPage() {
 
     } catch (err: unknown) {
       console.error("Payment initiation error:", err);
-      const message = err instanceof Error ? err.message : 'Payment failed to initiate.';
-      setError(message);
+      const errorObj = err as Error;
+      setError(errorObj.message || 'Payment initiation failed. Please try again.');
       setLoading(false);
     }
   };
 
   if (initializing) {
     return (
-      <div className="min-h-[50vh] flex flex-col items-center justify-center">
-        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-600 font-medium">Verifying booking reservation...</p>
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Header />
+        <main className="flex-1 flex flex-col items-center justify-center p-4">
+          <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-slate-600 font-semibold text-sm">Preparing secure PayHere checkout...</p>
+        </main>
       </div>
     );
   }
 
   if (!booking) {
     return (
-      <div className="max-w-md mx-auto my-16 p-8 text-center bg-white border border-red-200 rounded-2xl shadow-sm">
-        <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-xl">✕</div>
-        <h2 className="text-lg font-bold text-slate-800 mb-2">No Active Booking Found</h2>
-        <p className="text-slate-500 text-sm mb-6">{error || 'Your checkout session may have expired.'}</p>
-        <button onClick={() => router.push('/')} className="bg-orange-600 text-white font-semibold px-6 py-2.5 rounded-xl hover:bg-orange-700 transition">
-          Back to Search
-        </button>
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Header />
+        <main className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-md w-full my-16 p-8 text-center bg-white border border-slate-200 rounded-3xl shadow-sm">
+            <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 font-bold text-xl">✕</div>
+            <h2 className="text-xl font-black text-slate-900 mb-2">Reservation Expired</h2>
+            <p className="text-slate-500 text-xs mb-6">
+              Your 10-minute temporary seat reservation has expired or could not be found. Please search and select your seats again.
+            </p>
+            <button 
+              onClick={() => router.push('/')} 
+              className="w-full bg-orange-600 text-white font-bold py-3 rounded-xl hover:bg-orange-700 transition text-sm cursor-pointer"
+            >
+              Search Buses Again
+            </button>
+          </div>
+        </main>
       </div>
     );
   }
 
+  const individualFare = Number(booking.tripSnapshot?.farePerSeat || booking.tripSnapshot?.baseFare || 0);
+
   return (
-    <div className="max-w-lg mx-auto my-12 px-4">
-      <div className="bg-white p-8 border border-slate-200 rounded-2xl shadow-lg">
-        <div className="text-center mb-6">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider bg-orange-100 text-orange-700 px-3 py-1 rounded-full">
-              Secure Checkout
-            </span>
-            <span className={`text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full ${
-              booking.bookingType === 'guest' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-            }`}>
-              {booking.bookingType === 'guest' ? 'Guest Checkout' : 'Account Checkout'}
-            </span>
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      <Header />
+
+      <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-8">
+        
+        {/* Top Trust Header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-xs font-black uppercase tracking-wider mb-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>256-Bit SSL Encrypted Checkout</span>
           </div>
-          <h1 className="text-2xl font-black text-slate-800 mt-2">Review & Pay</h1>
-          <p className="text-xs text-slate-500 font-mono mt-1">
-            Reference: <strong className="text-slate-800 font-bold">{booking.bookingReference || booking.id}</strong>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            {t('reviewAndPay')}
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Authoritative ticket reservation #<strong className="font-mono text-slate-800">{booking.bookingReference || booking.id}</strong>
           </p>
         </div>
-        
+
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-xl mb-6 text-sm font-medium">
-            {error}
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-xs sm:text-sm font-bold flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Breakdown Card */}
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 mb-6 space-y-3 text-sm">
-          <div className="flex justify-between items-start">
-            <span className="text-slate-500 font-medium">Trip Route</span>
-            <span className="font-bold text-slate-800 text-right">
-              {booking.tripSnapshot?.routeSnapshot?.startCity} &rarr; {booking.tripSnapshot?.routeSnapshot?.endCity}
-            </span>
-          </div>
+        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden mb-6">
+          
+          {/* Order Header Banner */}
+          <div className="bg-slate-900 text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-orange-400 block mb-1">
+                Intercity Transit Pass
+              </span>
+              <div className="flex items-center gap-2 text-xl font-black">
+                <span>{booking.tripSnapshot?.routeSnapshot?.startCity}</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+                <span>{booking.tripSnapshot?.routeSnapshot?.endCity}</span>
+              </div>
+            </div>
 
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Departure</span>
-            <span className="font-semibold text-slate-700">
-              {booking.tripSnapshot?.departureDate} at {booking.tripSnapshot?.departureTime}
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Bus Operator</span>
-            <span className="font-semibold text-slate-700">
-              {booking.tripSnapshot?.busSnapshot?.name} ({booking.tripSnapshot?.busSnapshot?.type})
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Individual Fare</span>
-            <span className="font-semibold text-slate-700">
-              Rs. {Number(booking.tripSnapshot?.baseFare || (booking.totalAmount / booking.seats.length)).toFixed(2)} / seat
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Passenger</span>
-            <span className="font-semibold text-slate-700">{booking.passengerName}</span>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Selected Seats ({booking.seats.length})</span>
-            <div className="flex flex-wrap gap-1">
-              {booking.seats.map(s => (
-                <span key={s} className="px-2 py-0.5 bg-orange-100 text-orange-700 font-bold text-xs rounded">
-                  {s}
-                </span>
-              ))}
+            <div className="text-left sm:text-right">
+              <span className="text-[10px] font-bold text-slate-400 block">Total Amount</span>
+              <span className="text-2xl font-black text-orange-400">
+                Rs. {Number(booking.totalAmount).toFixed(2)}
+              </span>
             </div>
           </div>
 
-          <div className="border-t border-slate-200 pt-3 mt-3 flex justify-between items-center">
-            <span className="font-bold text-slate-700 text-base">Total Payable</span>
-            <span className="font-black text-2xl text-orange-600">
-              Rs. {Number(booking.totalAmount).toFixed(2)}
-            </span>
+          {/* Details Body */}
+          <div className="p-5 sm:p-6 space-y-5 text-xs">
+            
+            {/* Journey Specs Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pb-5 border-b border-slate-100">
+              <div className="flex items-start gap-2.5">
+                <Calendar className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Date</span>
+                  <span className="font-bold text-slate-800 text-sm">{booking.tripSnapshot?.departureDate}</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Departure</span>
+                  <span className="font-mono font-bold text-slate-800 text-sm">{booking.tripSnapshot?.departureTime}</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <BusIcon className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Bus & Coach</span>
+                  <span className="font-bold text-slate-800 text-xs block">
+                    {booking.tripSnapshot?.operatorName || booking.tripSnapshot?.busSnapshot?.name}
+                  </span>
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {booking.tripSnapshot?.busSnapshot?.regNumber}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Passenger & Seats Info */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-5 border-b border-slate-100">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Passenger Details
+                </span>
+                <div className="font-bold text-slate-900 text-sm">{booking.passengerName}</div>
+                <div className="text-slate-500 font-mono text-xs">{booking.passengerPhone}</div>
+                {booking.passengerEmail && (
+                  <div className="text-slate-400 text-xs">{booking.passengerEmail}</div>
+                )}
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Reserved Seats ({booking.seats?.length || 0})
+                </span>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {booking.seats?.map(seat => (
+                    <span 
+                      key={seat}
+                      className="px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg font-mono font-black text-xs"
+                    >
+                      {seat}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Authoritative Fare Breakdown */}
+            <div className="space-y-2 pt-1">
+              <div className="flex justify-between text-slate-600">
+                <span>Bus Fare ({booking.seats?.length || 1} &times; Rs. {individualFare.toFixed(2)})</span>
+                <span className="font-mono font-bold text-slate-900">Rs. {Number(booking.totalAmount).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Gateway Convenience Fee</span>
+                <span className="font-bold text-emerald-600">FREE</span>
+              </div>
+              <div className="pt-2 border-t border-slate-100 flex justify-between items-baseline text-base">
+                <span className="font-black text-slate-900">Grand Total Payable</span>
+                <span className="text-2xl font-black text-orange-600">Rs. {Number(booking.totalAmount).toFixed(2)} LKR</span>
+              </div>
+            </div>
+
           </div>
+
+          {/* Checkout CTA Footer */}
+          <div className="bg-slate-50 p-5 sm:p-6 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <Lock className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Verified by PayHere Central Bank of Sri Lanka compliant payment system.</span>
+            </div>
+
+            <button
+              onClick={handlePayment}
+              disabled={loading}
+              className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 active:scale-95 text-white font-black px-8 py-4 rounded-2xl transition shadow-md hover:shadow-lg flex items-center justify-center gap-2.5 text-sm cursor-pointer disabled:opacity-50"
+            >
+              <CreditCard className="w-4 h-4 stroke-[2.5]" />
+              <span>{loading ? 'Connecting to PayHere...' : 'Pay Securely via PayHere'}</span>
+            </button>
+          </div>
+
         </div>
 
-        {/* Sandbox Notice */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 mb-6 text-xs text-amber-800">
-          <p className="font-bold mb-1">🧪 PayHere Sandbox Mode Active</p>
-          <p>Test Visa Card: <code className="font-mono bg-amber-100 px-1 py-0.5 rounded font-bold">4916 2175 0161 1292</code> (Expiry: Any future date, CVV: 123)</p>
-        </div>
-
-        {/* Pay Button */}
-        <button 
-          onClick={handlePayment}
-          disabled={loading}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer text-base"
-        >
-          {loading ? (
-            <>
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>Connecting to PayHere...</span>
-            </>
-          ) : (
-            <>
-              <span>🔒 Pay Securely via PayHere • Rs. {Number(booking.totalAmount).toFixed(2)}</span>
-            </>
-          )}
-        </button>
-
-        <div className="mt-6 text-center">
-          <Image 
-            src="https://www.payhere.lk/downloads/images/payhere_long_banner.png" 
-            alt="PayHere Secured Payment Gateway" 
-            width={300}
-            height={32}
-            unoptimized
-            className="h-8 w-auto mx-auto opacity-75 grayscale hover:grayscale-0 transition-all" 
-          />
-        </div>
-      </div>
+      </main>
     </div>
   );
 }

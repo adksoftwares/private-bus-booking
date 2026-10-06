@@ -47,10 +47,14 @@ export interface Booking {
   tripSnapshot?: {
     departureDate: string;
     departureTime: string;
+    arrivalTime?: string;
+    duration?: string;
     routeSnapshot: RouteSnapshot;
     busSnapshot: BusSnapshot;
     baseFare: number;
+    farePerSeat?: number;
     ownerId: string;
+    operatorName?: string;
   };
 }
 

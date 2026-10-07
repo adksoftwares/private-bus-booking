@@ -23,12 +23,12 @@ import {
 } from 'lucide-react';
 
 export default function FleetPage() {
-  const { user, isOwner, isAdmin, refreshRole, authFetch } = useAuth();
+  const { user, isOwner, isAdmin, refreshRole, authFetch, loading: authLoading } = useAuth();
   const router = useRouter();
   const t = useTranslations('fleet');
 
   const [buses, setBuses] = useState<Bus[]>([]);
-  const [loading, setLoading] = useState(Boolean(user));
+  const [loading, setLoading] = useState(true);
   const [becomingOwner, setBecomingOwner] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -125,6 +125,15 @@ export default function FleetPage() {
       console.error("Failed to toggle bus status:", err);
     }
   };
+
+  if (authLoading || (loading && user)) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[70vh] flex flex-col items-center justify-center">
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Loading your bus fleet...</p>
+      </div>
+    );
+  }
 
   if (!user) {
     return (

@@ -52,7 +52,7 @@ type LayoutType = '2x2' | '2x3' | '2+1';
 type BackRowType = '5-seater' | '4-seater';
 
 export default function NewBusPage() {
-  const { user, authFetch } = useAuth();
+  const { user, authFetch, loading: authLoading } = useAuth();
   const router = useRouter();
   const t = useTranslations('fleet');
 
@@ -308,6 +308,15 @@ export default function NewBusPage() {
 
     return previewRows;
   };
+
+  if (authLoading) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-16 min-h-[60vh] flex flex-col items-center justify-center">
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Loading bus registration...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">

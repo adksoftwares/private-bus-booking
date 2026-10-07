@@ -21,12 +21,12 @@ import {
 } from 'lucide-react';
 
 export default function OwnerTripsPage() {
-  const { user, isAdmin, authFetch } = useAuth();
+  const { user, isAdmin, authFetch, loading: authLoading } = useAuth();
   const router = useRouter();
   const t = useTranslations('trips');
 
   const [trips, setTrips] = useState<Trip[]>([]);
-  const [loading, setLoading] = useState(Boolean(user));
+  const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [filterTab, setFilterTab] = useState<'all' | 'scheduled' | 'cancelled'>('all');
@@ -126,6 +126,15 @@ export default function OwnerTripsPage() {
       setUpdatingId(null);
     }
   };
+
+  if (authLoading || (loading && user)) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[60vh] flex flex-col items-center justify-center">
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Loading your operator dashboard...</p>
+      </div>
+    );
+  }
 
   if (!user) {
     return (

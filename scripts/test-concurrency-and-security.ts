@@ -1340,6 +1340,148 @@ async function runTestSuite() {
   assert(ownerTripUpdate.success && tripsStore['TRIP-ROUTE-1'].fare === 2800, 'Permits verified trip owner to update trip parameters');
 
   // ----------------------------------------------------
+  // SUITE 23: Extreme Concurrency & Deadlock Elimination
+  // ----------------------------------------------------
+  console.log('\n--- Suite 23: Extreme Concurrency & Deadlock Elimination ---');
+
+  // Simulate opposite-order locking attempt
+  // Without sorting, T1 locks [A1, B2] while T2 locks [B2, A1] -> Deadlock!
+  // With deterministic sorting, both lock in order [A1, B2] -> Zero deadlocks!
+  function sortSeatsForLocking(seats: string[]): string[] {
+    return [...new Set(seats)].sort();
+  }
+
+  const p1Requested = ['B2', 'A1'];
+  const p2Requested = ['A1', 'B2'];
+
+  const p1Sorted = sortSeatsForLocking(p1Requested);
+  const p2Sorted = sortSeatsForLocking(p2Requested);
+
+  assert(
+    JSON.stringify(p1Sorted) === JSON.stringify(p2Sorted) && p1Sorted[0] === 'A1' && p1Sorted[1] === 'B2',
+    'Deterministic sorting normalizes inverted seat request orders to prevent cyclic deadlock'
+  );
+
+  // Run inverted order locks through TransactionalCell
+  const [deadlockTest1, deadlockTest2] = await Promise.all([
+    simulateMultiSeatAtomicLock(p1Sorted, 'client_inverted_order_1'),
+    simulateMultiSeatAtomicLock(p2Sorted, 'client_inverted_order_2')
+  ]);
+
+  const dlWinners = [deadlockTest1, deadlockTest2].filter((r) => r === true).length;
+  const dlLosers = [deadlockTest1, deadlockTest2].filter((r) => r === false).length;
+
+  assert(dlWinners === 1, `Exactly ONE transaction succeeded without cyclic deadlock (winners: ${dlWinners})`);
+  assert(dlLosers === 1, `The competing transaction was rejected cleanly with conflict (losers: ${dlLosers})`);
+
+  // ----------------------------------------------------
+  // SUITE 24: Sri Lanka Timezone (Asia/Colombo UTC+5:30) Accuracy
+  // ----------------------------------------------------
+  console.log('\n--- Suite 24: Sri Lanka Timezone (Asia/Colombo UTC+5:30) Accuracy ---');
+
+  function calculateSriLankaDepartureDiffHours(
+    departureDate: string,
+    departureTime: string,
+    currentUtcIso: string
+  ): number {
+    // Explicit Sri Lanka Standard Time (+05:30)
+    const departureIso = `${departureDate}T${departureTime}:00+05:30`;
+    const depTimeMs = new Date(departureIso).getTime();
+    const currTimeMs = new Date(currentUtcIso).getTime();
+    return (depTimeMs - currTimeMs) / (1000 * 60 * 60);
+  }
+
+  // Current time: 2026-11-01 00:00:00 UTC = 05:30:00 Sri Lanka Time
+  // Bus departure: 2026-11-01 08:00:00 Sri Lanka Time
+  // Exact difference must be 2.5 hours
+  const diffHours = calculateSriLankaDepartureDiffHours('2026-11-01', '08:00', '2026-11-01T00:00:00Z');
+  assert(
+    Math.abs(diffHours - 2.5) < 0.001,
+    `Accurately computes Sri Lanka Standard Time departure offset (expected: 2.5h, actual: ${diffHours}h)`
+  );
+
+  // Departure 25 hours in the future -> 100% refund
+  const refundDiffLong = calculateSriLankaDepartureDiffHours('2026-11-02', '08:00', '2026-11-01T01:30:00Z');
+  assert(refundDiffLong > 24, 'Evaluates >24 hours before departure in Sri Lanka time for 100% refund tier');
+
+  // Departure 18 hours in the future -> 50% refund
+  const refundDiffMid = calculateSriLankaDepartureDiffHours('2026-11-02', '08:00', '2026-11-01T08:30:00Z');
+  assert(refundDiffMid >= 12 && refundDiffMid <= 24, 'Evaluates 12-24 hours in Sri Lanka time for 50% refund tier');
+
+  // ----------------------------------------------------
+  // SUITE 25: Terminal State Guards on Asynchronous Payment Webhooks
+  // ----------------------------------------------------
+  console.log('\n--- Suite 25: Terminal State Guards on Asynchronous Webhooks ---');
+
+  interface WebhookBookingRecord {
+    id: string;
+    status: 'pending' | 'confirmed' | 'cancelled' | 'boarded' | 'payment_failed';
+    amount: number;
+  }
+
+  function simulateAdvancedWebhookProcessing(
+    booking: WebhookBookingRecord,
+    statusCode: string,
+    amount: number
+  ): { success: boolean; status: string; reason?: string } {
+    if (Math.abs(booking.amount - amount) >= 0.01) {
+      return { success: false, status: 'amount_mismatch', reason: 'AMOUNT_MISMATCH' };
+    }
+
+    // Terminal state guard: Already cancelled
+    if (booking.status === 'cancelled') {
+      return { success: false, status: 'already_cancelled', reason: 'PAYMENT_RECEIVED_FOR_CANCELLED_BOOKING' };
+    }
+
+    // Terminal state guard: Already boarded
+    if (booking.status === 'boarded') {
+      return { success: true, status: 'already_boarded' };
+    }
+
+    // Idempotency check: Already confirmed
+    if (booking.status === 'confirmed') {
+      return { success: true, status: 'already_confirmed' };
+    }
+
+    if (statusCode === '2') {
+      booking.status = 'confirmed';
+      return { success: true, status: 'confirmed' };
+    } else {
+      if (booking.status === 'pending') {
+        booking.status = 'payment_failed';
+      }
+      return { success: false, status: 'payment_failed' };
+    }
+  }
+
+  // 25a: Late successful payment arriving after user cancelled booking
+  const cancelledBookingRec: WebhookBookingRecord = { id: 'BK-LATE-WEBHOOK', status: 'cancelled', amount: 3500 };
+  const latePaymentResult = simulateAdvancedWebhookProcessing(cancelledBookingRec, '2', 3500);
+  assert(
+    !latePaymentResult.success &&
+      latePaymentResult.status === 'already_cancelled' &&
+      cancelledBookingRec.status === 'cancelled',
+    'Prevents illegal resurrection: Late payment webhook on cancelled booking rejected safely without mutating status'
+  );
+
+  // 25b: Late failed payment arriving after user cancelled booking
+  const lateFailedResult = simulateAdvancedWebhookProcessing(cancelledBookingRec, '-1', 3500);
+  assert(
+    !lateFailedResult.success &&
+      lateFailedResult.status === 'already_cancelled' &&
+      cancelledBookingRec.status === 'cancelled',
+    'Prevents illegal state transition: Failed webhook on cancelled booking leaves cancelled terminal status intact'
+  );
+
+  // 25c: Webhook on already-boarded ticket acknowledged idempotently
+  const boardedBookingRec: WebhookBookingRecord = { id: 'BK-BOARDED-WEBHOOK', status: 'boarded', amount: 3500 };
+  const boardedWebhookResult = simulateAdvancedWebhookProcessing(boardedBookingRec, '2', 3500);
+  assert(
+    boardedWebhookResult.success && boardedWebhookResult.status === 'already_boarded',
+    'Acknowledges replayed webhook on already-boarded passenger idempotently'
+  );
+
+  // ----------------------------------------------------
   // TEST SUMMARY
   // ----------------------------------------------------
   console.log('\n================================================================');

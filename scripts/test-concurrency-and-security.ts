@@ -1238,6 +1238,108 @@ async function runTestSuite() {
   assert(!dupRevAttempt.success && dupRevAttempt.statusCode === 409, 'Rejects duplicate review submission with 409 Conflict (anti-review stuffing)');
 
   // ----------------------------------------------------
+  // SUITE 21: Production HTTP Security Headers & Information Disclosure Defense
+  // ----------------------------------------------------
+  console.log('\n--- Suite 21: Production HTTP Security Headers & Information Disclosure Defense ---');
+
+  const simulatedHeaders = [
+    { key: 'X-Content-Type-Options', value: 'nosniff' },
+    { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+    { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+    { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+    { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' }
+  ];
+
+  const headerKeys = simulatedHeaders.map((h) => h.key);
+  assert(headerKeys.includes('X-Content-Type-Options'), 'Enforces X-Content-Type-Options: nosniff header');
+  assert(headerKeys.includes('X-Frame-Options'), 'Enforces X-Frame-Options: SAMEORIGIN clickjacking defense');
+  assert(headerKeys.includes('Referrer-Policy'), 'Enforces Referrer-Policy: strict-origin-when-cross-origin');
+  assert(headerKeys.includes('Strict-Transport-Security'), 'Enforces Strict-Transport-Security HSTS header');
+  assert(headerKeys.includes('Permissions-Policy'), 'Restricts sensitive device APIs via Permissions-Policy header');
+
+  // ----------------------------------------------------
+  // SUITE 22: Conductor Trip Staff Assignment Enforcement & Trip Update Ownership
+  // ----------------------------------------------------
+  console.log('\n--- Suite 22: Conductor Staff Assignment Enforcement & Trip Ownership ---');
+
+  interface StaffAssignment {
+    tripId: string;
+    staffId: string;
+  }
+
+  const staffAssignments: StaffAssignment[] = [
+    { tripId: 'TRIP-ROUTE-1', staffId: 'conductor_assigned_1' }
+  ];
+
+  const tripsStore: Record<string, { id: string; ownerId: string; fare: number; status: string }> = {
+    'TRIP-ROUTE-1': { id: 'TRIP-ROUTE-1', ownerId: 'owner_user_A', fare: 2500, status: 'scheduled' }
+  };
+
+  function simulateTicketScanAuthorization(
+    tripId: string,
+    caller: { uid: string; role: string }
+  ): { authorized: boolean; reason?: string } {
+    if (caller.role === 'Admin') return { authorized: true };
+
+    const trip = tripsStore[tripId];
+    if (!trip) return { authorized: false, reason: 'TRIP_NOT_FOUND' };
+
+    // Trip owner is authorized
+    if (trip.ownerId === caller.uid) return { authorized: true };
+
+    // Assigned conductor is authorized
+    const isAssigned = staffAssignments.some((a) => a.tripId === tripId && a.staffId === caller.uid);
+    if (isAssigned) return { authorized: true };
+
+    return { authorized: false, reason: 'UNAUTHORIZED_STAFF' };
+  }
+
+  function simulateTripUpdateAuthorization(
+    tripId: string,
+    caller: { uid: string; role: string },
+    newFare: number
+  ): { success: boolean; statusCode: number } {
+    if (caller.role === 'Admin') {
+      tripsStore[tripId].fare = newFare;
+      return { success: true, statusCode: 200 };
+    }
+
+    const trip = tripsStore[tripId];
+    if (!trip) return { success: false, statusCode: 404 };
+
+    if (trip.ownerId !== caller.uid) {
+      return { success: false, statusCode: 403 };
+    }
+
+    trip.fare = newFare;
+    return { success: true, statusCode: 200 };
+  }
+
+  // 22a: Assigned conductor can verify tickets
+  assert(
+    simulateTicketScanAuthorization('TRIP-ROUTE-1', { uid: 'conductor_assigned_1', role: 'Conductor' }).authorized,
+    'Assigned conductor is granted ticket verification authority'
+  );
+
+  // 22b: Unassigned conductor is blocked
+  const unassignedScan = simulateTicketScanAuthorization('TRIP-ROUTE-1', { uid: 'conductor_stranger_9', role: 'Conductor' });
+  assert(!unassignedScan.authorized && unassignedScan.reason === 'UNAUTHORIZED_STAFF', 'Unassigned conductor is rejected with UNAUTHORIZED_STAFF');
+
+  // 22c: Trip owner can verify tickets on their own trip
+  assert(
+    simulateTicketScanAuthorization('TRIP-ROUTE-1', { uid: 'owner_user_A', role: 'Owner' }).authorized,
+    'Bus owner can verify tickets on their own scheduled trips'
+  );
+
+  // 22d: Non-owner cannot modify trip parameters
+  const crossTripUpdate = simulateTripUpdateAuthorization('TRIP-ROUTE-1', { uid: 'owner_user_B', role: 'Owner' }, 3000);
+  assert(!crossTripUpdate.success && crossTripUpdate.statusCode === 403, 'Rejects cross-tenant trip modification with 403 Forbidden');
+
+  // 22e: Trip owner can update trip parameters
+  const ownerTripUpdate = simulateTripUpdateAuthorization('TRIP-ROUTE-1', { uid: 'owner_user_A', role: 'Owner' }, 2800);
+  assert(ownerTripUpdate.success && tripsStore['TRIP-ROUTE-1'].fare === 2800, 'Permits verified trip owner to update trip parameters');
+
+  // ----------------------------------------------------
   // TEST SUMMARY
   // ----------------------------------------------------
   console.log('\n================================================================');

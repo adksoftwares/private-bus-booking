@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireTripOwnership } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 import { updateTripSchema, formatZodError } from '@/lib/validation/schemas';
-import { Database } from '@/types/database';
+import { Database, Json } from '@/types/database';
 
 export async function GET(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
@@ -45,10 +46,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ tripId: 
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
+    enforceRateLimit(req, 'update_trip', 30, 60);
     const { tripId } = await params;
 
     // 1. Authoritative Server Ownership Check (Caller must be Admin or the Trip's verified Owner)
-    await requireTripOwnership(req, tripId);
+    const user = await requireTripOwnership(req, tripId);
 
     // 2. Validate update payload with Zod
     const body = await req.json();
@@ -93,6 +95,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ tripId
     if (updateError) {
       console.error("Failed to update trip:", updateError);
       return NextResponse.json({ error: 'Failed to update trip' }, { status: 500 });
+    }
+
+    // 3. Audit Log
+    try {
+      await supabase.from('audit_logs').insert([{
+        action: 'trip_updated',
+        resource_type: 'trip',
+        resource_id: tripId,
+        actor_id: user.uid,
+        metadata: updates as unknown as Json,
+        created_at: new Date().toISOString()
+      }]);
+    } catch (auditErr) {
+      console.warn("Non-critical: Audit log insert error:", auditErr);
     }
 
     return NextResponse.json({ success: true, tripId });

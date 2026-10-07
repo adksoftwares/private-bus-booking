@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     let query = supabase
       .from('trips')
       .select('*')
-      .order('departure_date', { ascending: false })
+      .order('departure_date', { ascending: true })
       .order('departure_time', { ascending: true });
 
     // Multi-tenant Trip Isolation:

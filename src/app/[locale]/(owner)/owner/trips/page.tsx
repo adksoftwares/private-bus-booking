@@ -154,12 +154,18 @@ export default function OwnerTripsPage() {
     );
   }
 
-  const filteredTrips = trips.filter(t => {
-    if (filterTab === 'all') return true;
-    if (filterTab === 'scheduled') return t.status === 'scheduled';
-    if (filterTab === 'cancelled') return t.status === 'cancelled';
-    return true;
-  });
+  const filteredTrips = trips
+    .filter(t => {
+      if (filterTab === 'all') return true;
+      if (filterTab === 'scheduled') return t.status === 'scheduled';
+      if (filterTab === 'cancelled') return t.status === 'cancelled';
+      return true;
+    })
+    .sort((a, b) => {
+      const dateDiff = a.departureDate.localeCompare(b.departureDate);
+      if (dateDiff !== 0) return dateDiff;
+      return (a.departureTime || '').localeCompare(b.departureTime || '');
+    });
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">

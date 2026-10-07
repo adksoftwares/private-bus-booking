@@ -117,6 +117,7 @@ export async function POST(req: Request) {
       endCity,
       stops = [],
       departureDate,
+      departureDates = [],
       departureTime,
       arrivalTime = '',
       duration = '',
@@ -182,18 +183,20 @@ export async function POST(req: Request) {
         created_at: new Date().toISOString()
       }], { onConflict: 'id' });
 
-    // 6. Generate Trip ID & Record
-    const tripId = `TRIP-${crypto.randomUUID()}`;
-    const finalFare = Number(farePerSeat);
+    // 6. Generate Trip Records (Single or Recurring Batch)
+    const targetDates: string[] = (departureDates && departureDates.length > 0)
+      ? Array.from(new Set(departureDates)).sort()
+      : [departureDate!];
 
-    const tripRecord = {
-      id: tripId,
+    const finalFare = Number(farePerSeat);
+    const tripRecords = targetDates.map(date => ({
+      id: `TRIP-${crypto.randomUUID()}`,
       bus_id: busId,
       owner_id: busData.owner_id,
       route_id: routeId,
       route_snapshot: routeSnapshot as unknown as Json,
       bus_snapshot: busSnapshot as unknown as Json,
-      departure_date: departureDate,
+      departure_date: date,
       departure_time: departureTime,
       arrival_time: arrivalTime || null,
       duration: duration || null,
@@ -203,11 +206,11 @@ export async function POST(req: Request) {
       status: 'scheduled',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
-    };
+    }));
 
     const { error: insertTripError } = await supabase
       .from('trips')
-      .insert([tripRecord]);
+      .insert(tripRecords);
 
     if (insertTripError) {
       console.error("Failed to insert trip:", insertTripError);
@@ -219,13 +222,14 @@ export async function POST(req: Request) {
       await supabase.from('audit_logs').insert([{
         action: 'trip_created',
         resource_type: 'trip',
-        resource_id: tripId,
+        resource_id: tripRecords[0].id,
         actor_id: authenticatedUser.uid,
         metadata: {
           busId,
           startCity: cleanStart,
           endCity: cleanEnd,
-          departureDate,
+          datesCount: tripRecords.length,
+          departureDates: targetDates,
           departureTime,
           farePerSeat: finalFare
         } as unknown as Json,
@@ -237,23 +241,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      tripId,
-      trip: {
-        id: tripId,
-        busId,
-        ownerId: busData.owner_id,
-        routeId,
-        routeSnapshot,
-        busSnapshot,
-        departureDate,
-        departureTime,
-        arrivalTime,
-        duration,
-        baseFare: finalFare,
-        farePerSeat: finalFare,
-        operatorName: busData.name,
-        status: 'scheduled'
-      }
+      tripId: tripRecords[0].id,
+      count: tripRecords.length,
+      tripIds: tripRecords.map(t => t.id),
+      message: tripRecords.length > 1
+        ? `Successfully scheduled ${tripRecords.length} recurring trips!`
+        : 'Trip successfully scheduled!'
     });
 
   } catch (error: unknown) {

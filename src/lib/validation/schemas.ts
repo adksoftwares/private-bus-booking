@@ -59,12 +59,16 @@ export const createTripSchema = z.object({
   busId: z.string().min(1, 'Valid bus must be selected'),
   startCity: z.string().trim().min(2, 'Origin city is required'),
   endCity: z.string().trim().min(2, 'Destination city is required'),
-  departureDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid travel date (YYYY-MM-DD) is required'),
+  departureDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid travel date (YYYY-MM-DD) is required').optional(),
+  departureDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid travel date (YYYY-MM-DD) is required')).optional(),
   departureTime: z.string().regex(/^\d{2}:\d{2}$/, 'Valid departure time (HH:MM) is required'),
   arrivalTime: z.string().regex(/^\d{2}:\d{2}$/, 'Valid arrival time (HH:MM) is required').optional().or(z.literal('')),
   duration: z.string().optional(),
   farePerSeat: z.coerce.number().min(1, 'Fare must be greater than 0').max(50000, 'Fare cannot exceed 50,000 LKR'),
   stops: z.array(z.any()).optional()
+}).refine(data => Boolean(data.departureDate || (data.departureDates && data.departureDates.length > 0)), {
+  message: 'At least one travel date is required',
+  path: ['departureDate']
 }).refine(data => data.startCity.toLowerCase() !== data.endCity.toLowerCase(), {
   message: 'Origin and Destination cannot be the same city',
   path: ['endCity']

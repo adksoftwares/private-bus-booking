@@ -20,13 +20,16 @@ export function getSupabaseAdminClient() {
     throw new Error('Server configuration error: Supabase URL is not configured.');
   }
 
-  if (!serviceRoleKey || serviceRoleKey.includes('placeholder')) {
-    console.error('[CRITICAL] Missing or placeholder SUPABASE_SERVICE_ROLE_KEY environment variable. Privileged operations cannot proceed.');
-    throw new Error('Server configuration error: Supabase Service Role Key is not configured.');
+  const hasServiceRoleKey = Boolean(serviceRoleKey && !serviceRoleKey.includes('placeholder'));
+  const effectiveKey = hasServiceRoleKey ? serviceRoleKey! : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!effectiveKey) {
+    console.error('[CRITICAL] Missing Supabase API key (service role key or anon key).');
+    throw new Error('Server configuration error: No Supabase API key is configured.');
   }
 
   if (!adminClient) {
-    adminClient = createClient<Database>(supabaseUrl, serviceRoleKey, {
+    adminClient = createClient<Database>(supabaseUrl, effectiveKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false

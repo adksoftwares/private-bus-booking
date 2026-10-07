@@ -172,7 +172,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
 
         const resData = await res.json();
         if (!res.ok || !resData.success) {
-          alert(resData.message || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
+          alert(resData.message || resData.error || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
           await fetchSeatStatuses();
           return;
         }

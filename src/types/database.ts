@@ -564,7 +564,7 @@ export interface Database {
           p_trip_id: string;
           p_seat_ids: string[];
           p_user_id: string;
-          p_booking_id: string;
+          p_booking_id?: string | null;
           p_duration_seconds?: number;
         };
         Returns: Json;

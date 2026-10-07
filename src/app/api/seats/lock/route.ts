@@ -18,9 +18,8 @@ export async function POST(req: Request) {
     const seatsToLock: string[] = seatIds || [seatId];
     const user = await getAuthenticatedUser(req);
     const effectiveUserId = user?.uid || guestSessionId || 'anonymous_guest';
-    const tempOrderId = `TMP-${crypto.randomUUID()}`;
 
-    const lockResult = await atomicLockSeats(tripId, seatsToLock, effectiveUserId, tempOrderId);
+    const lockResult = await atomicLockSeats(tripId, seatsToLock, effectiveUserId);
 
     if (!lockResult.success) {
       return NextResponse.json({

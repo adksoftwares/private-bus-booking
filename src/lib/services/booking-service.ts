@@ -96,7 +96,7 @@ export async function atomicLockSeats(
   tripId: string,
   seatIds: string[],
   effectiveUserId: string,
-  orderId: string
+  orderId?: string
 ): Promise<{ success: boolean; conflictingSeat?: string }> {
   if (!seatIds || seatIds.length === 0) {
     return { success: false };
@@ -112,7 +112,7 @@ export async function atomicLockSeats(
     p_trip_id: tripId,
     p_seat_ids: seatIds,
     p_user_id: effectiveUserId,
-    p_booking_id: orderId,
+    p_booking_id: orderId || null,
     p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000)
   });
 

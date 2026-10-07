@@ -207,7 +207,8 @@ export async function createPendingBooking(params: CreateBookingParams) {
       uid: authenticatedUser?.uid || null
     },
     p_seat_ids: selectedSeats,
-    p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000)
+    p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000),
+    p_guest_session_id: params.guestSessionId || null
   });
 
   if (rpcError) {

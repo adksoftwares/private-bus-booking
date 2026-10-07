@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireOwner } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { createBusSchema, formatZodError } from '@/lib/validation/schemas';
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const requestedOwnerId = searchParams.get('ownerId');
 
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
     let query = supabase
       .from('buses')
       .select('*')
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
       imageUrl
     } = parseResult.data;
 
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
     const busId = `BUS-${crypto.randomUUID()}`;
 
     // 3. Database insertion with server-bound owner ID

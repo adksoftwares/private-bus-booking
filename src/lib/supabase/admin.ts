@@ -20,8 +20,8 @@ export function getSupabaseAdminClient() {
     throw new Error('Server configuration error: Supabase URL is not configured.');
   }
 
-  if (!serviceRoleKey) {
-    console.error('[CRITICAL] Missing SUPABASE_SERVICE_ROLE_KEY environment variable. Privileged operations cannot proceed.');
+  if (!serviceRoleKey || serviceRoleKey.includes('placeholder')) {
+    console.error('[CRITICAL] Missing or placeholder SUPABASE_SERVICE_ROLE_KEY environment variable. Privileged operations cannot proceed.');
     throw new Error('Server configuration error: Supabase Service Role Key is not configured.');
   }
 

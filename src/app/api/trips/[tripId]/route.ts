@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireTripOwnership } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { updateTripSchema, formatZodError } from '@/lib/validation/schemas';
@@ -8,7 +8,7 @@ import { Database, Json } from '@/types/database';
 export async function GET(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
     const { tripId } = await params;
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
 
     const { data: trip, error } = await supabase
       .from('trips')
@@ -63,7 +63,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ tripId
     }
 
     const { status, farePerSeat, departureTime, arrivalTime } = parseResult.data;
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
 
     const updates: Database['public']['Tables']['trips']['Update'] = {
       updated_at: new Date().toISOString()

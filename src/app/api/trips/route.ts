@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireOwner } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { createTripSchema, formatZodError } from '@/lib/validation/schemas';
@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     const requestedOwnerId = searchParams.get('ownerId');
     const date = searchParams.get('date');
 
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
     let query = supabase
       .from('trips')
       .select('*')
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     // 1. Rate limiting & Authoritative Server Authentication
     enforceRateLimit(req, 'create_trip', 15, 60);
     const authenticatedUser = await requireOwner(req);
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
 
     // 2. Validate request payload with Zod
     const body = await req.json();

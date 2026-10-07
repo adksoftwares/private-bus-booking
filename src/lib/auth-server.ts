@@ -1,5 +1,7 @@
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { UserRole } from '@/types/user';
+import { Database } from '@/types/database';
 
 export class HttpError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -28,14 +30,37 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
   try {
     let user = null;
     const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+    let bearerToken = '';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7).trim();
-      if (token) {
-        const supabase = getSupabaseAdminClient();
-        const { data, error } = await supabase.auth.getUser(token);
-        if (!error && data?.user) {
-          user = data.user;
+      bearerToken = authHeader.substring(7).trim();
+      if (bearerToken) {
+        // 1. Authoritative verification using standard anon key (doesn't fail if service role is missing)
+        try {
+          const authClient = createSupabaseClient<Database>(supabaseUrl, supabaseAnonKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+          const { data, error } = await authClient.auth.getUser(bearerToken);
+          if (!error && data?.user) {
+            user = data.user;
+          }
+        } catch {
+          // ignore and fallback
+        }
+
+        // 2. Fallback to admin client if service role is configured
+        if (!user) {
+          try {
+            const supabaseAdmin = getSupabaseAdminClient();
+            const { data, error } = await supabaseAdmin.auth.getUser(bearerToken);
+            if (!error && data?.user) {
+              user = data.user;
+            }
+          } catch {
+            // ignore
+          }
         }
       }
     }
@@ -63,36 +88,68 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
     const phone = user.phone || (user.user_metadata?.phone as string | undefined);
     const name = (user.user_metadata?.name || user.user_metadata?.displayName || user.user_metadata?.full_name) as string | undefined;
 
-    const supabaseAdmin = getSupabaseAdminClient();
-
     // Check profiles table for role
     let role: UserRole = 'Passenger';
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('role, name, phone')
-      .eq('id', uid)
-      .maybeSingle();
+    let profileData: { role?: string; name?: string; phone?: string | null } | null = null;
 
-    if (profile?.role) {
-      role = profile.role as UserRole;
+    // Query 1: Use user's own token (works via RLS auth.uid() = id)
+    if (bearerToken) {
+      try {
+        const userClient = createSupabaseClient<Database>(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: { headers: { Authorization: `Bearer ${bearerToken}` } }
+        });
+        const { data: p } = await userClient
+          .from('profiles')
+          .select('role, name, phone')
+          .eq('id', uid)
+          .maybeSingle();
+        if (p) profileData = p;
+      } catch {
+        // ignore
+      }
+    }
+
+    // Query 2: Try admin client if profileData is still empty
+    if (!profileData) {
+      try {
+        const supabaseAdmin = getSupabaseAdminClient();
+        const { data: p } = await supabaseAdmin
+          .from('profiles')
+          .select('role, name, phone')
+          .eq('id', uid)
+          .maybeSingle();
+        if (p) profileData = p;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (profileData?.role) {
+      role = profileData.role as UserRole;
     } else {
       // Check owners table
-      const { data: owner } = await supabaseAdmin
-        .from('owners')
-        .select('id')
-        .eq('id', uid)
-        .maybeSingle();
+      try {
+        const supabaseAdmin = getSupabaseAdminClient();
+        const { data: owner } = await supabaseAdmin
+          .from('owners')
+          .select('id')
+          .eq('id', uid)
+          .maybeSingle();
 
-      if (owner) {
-        role = 'Owner';
+        if (owner) {
+          role = 'Owner';
+        }
+      } catch {
+        // ignore
       }
     }
 
     return {
       uid,
       email,
-      phone: profile?.phone || phone,
-      name: profile?.name || name,
+      phone: (profileData?.phone ?? phone) || undefined,
+      name: profileData?.name || name,
       role,
       isAdmin: role === 'Admin',
       isOwner: role === 'Owner' || role === 'Admin',

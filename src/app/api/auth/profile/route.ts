@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireAuth } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { updateProfileSchema, formatZodError } from '@/lib/validation/schemas';
@@ -8,7 +8,7 @@ import { Json } from '@/types/database';
 export async function GET(req: Request) {
   try {
     const user = await requireAuth(req);
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -40,7 +40,7 @@ export async function PATCH(req: Request) {
     }
 
     const { name, phone } = parseResult.data;
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
 
     // 2. Fetch existing profile to retain values while preventing role escalation
     const { data: existingProfile } = await supabase

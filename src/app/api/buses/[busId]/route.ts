@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireOwner } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { updateBusSchema, formatZodError } from '@/lib/validation/schemas';
@@ -21,7 +21,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ busId:
     }
 
     const { status } = parseResult.data;
-    const supabase = getSupabaseAdminClient();
+    const supabase = getAuthenticatedRequestClient(req);
 
     // Verify ownership and fetch current status
     const { data: bus, error: findError } = await supabase

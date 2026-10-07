@@ -173,7 +173,7 @@ export async function POST(req: Request) {
     };
 
     // Save or update Route in Supabase
-    await supabase
+    const { error: routeError } = await supabase
       .from('routes')
       .upsert([{
         id: routeId,
@@ -182,6 +182,11 @@ export async function POST(req: Request) {
         stops: routeSnapshot.stops as unknown as Json,
         created_at: new Date().toISOString()
       }], { onConflict: 'id' });
+
+    if (routeError) {
+      console.error("Failed to upsert route:", routeError);
+      return NextResponse.json({ error: `Failed to register route: ${routeError.message}` }, { status: 500 });
+    }
 
     // 6. Generate Trip Records (Single or Recurring Batch)
     const targetDates: string[] = (departureDates && departureDates.length > 0)
@@ -214,7 +219,7 @@ export async function POST(req: Request) {
 
     if (insertTripError) {
       console.error("Failed to insert trip:", insertTripError);
-      return NextResponse.json({ error: 'Failed to create trip schedule in database.' }, { status: 500 });
+      return NextResponse.json({ error: `Failed to create trip schedule in database: ${insertTripError.message}` }, { status: 500 });
     }
 
     // 7. Audit Log

@@ -38,7 +38,8 @@ async function main() {
     '20261007_hardening.sql',
     '20261007_phase1_hardening.sql',
     '20261007_phase2_hardening.sql',
-    '20261007_phase3_hardening.sql'
+    '20261007_phase3_hardening.sql',
+    '20261007_phase4_routes_rls.sql'
   ];
 
   const migrationsDir = path.join(process.cwd(), 'supabase', 'migrations');

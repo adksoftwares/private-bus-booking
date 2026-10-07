@@ -26,36 +26,11 @@ export default function BookingPage() {
   const router = useRouter();
   const t = useTranslations('booking');
   
-  const [trip, setTrip] = useState<Trip | null>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = sessionStorage.getItem(`trip_cache_${tripId}`);
-        if (stored) return JSON.parse(stored);
-      } catch {}
-    }
-    return null;
-  });
-  const [loading, setLoading] = useState(() => !trip);
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  
-  const [selectedSeats, setSelectedSeats] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      const pendingSeatsStr = sessionStorage.getItem('pendingSeatSelection');
-      if (pendingSeatsStr) {
-        try {
-          const parsed = JSON.parse(pendingSeatsStr);
-          if (parsed.tripId === tripId && Array.isArray(parsed.selectedSeats)) {
-            sessionStorage.removeItem('pendingSeatSelection');
-            return parsed.selectedSeats;
-          }
-        } catch (e) {
-          console.error("Failed to parse pending seats:", e);
-        }
-      }
-    }
-    return [];
-  });
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   
   const [passengerDetails, setPassengerDetails] = useState({
     name: user?.displayName || '',
@@ -79,15 +54,40 @@ export default function BookingPage() {
     let isMounted = true;
     if (!tripId) return;
 
+    // 1. Restore cached trip from sessionStorage on client mount if present
+    try {
+      const stored = sessionStorage.getItem(`trip_cache_${tripId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && isMounted) {
+          setTrip(parsed);
+          setLoading(false);
+        }
+      }
+    } catch {}
+
+    // 2. Restore pending seats selected from results page
+    try {
+      const pendingSeatsStr = sessionStorage.getItem('pendingSeatSelection');
+      if (pendingSeatsStr) {
+        const parsed = JSON.parse(pendingSeatsStr);
+        if (parsed.tripId === tripId && Array.isArray(parsed.selectedSeats) && isMounted) {
+          setSelectedSeats(parsed.selectedSeats);
+          sessionStorage.removeItem('pendingSeatSelection');
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse pending seats:", e);
+    }
+
+    // 3. Fetch latest live trip and availability from API
     fetch(`/api/trips/${tripId}`)
       .then(res => res.json())
       .then((data) => {
         if (!isMounted) return;
         if (data.trip) {
           setTrip(data.trip);
-          if (typeof window !== 'undefined') {
-            try { sessionStorage.setItem(`trip_cache_${tripId}`, JSON.stringify(data.trip)); } catch {}
-          }
+          try { sessionStorage.setItem(`trip_cache_${tripId}`, JSON.stringify(data.trip)); } catch {}
         } else {
           setTrip(null);
         }

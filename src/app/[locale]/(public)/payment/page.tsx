@@ -402,13 +402,13 @@ export default function PaymentPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div className="bg-white p-2.5 rounded-xl border border-amber-100 shadow-xs">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">Visa (Success)</div>
-                  <div className="font-mono font-black text-slate-800 text-sm select-all tracking-wide">4111 1111 1111 1111</div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Visa (PayHere Test)</div>
+                  <div className="font-mono font-black text-slate-800 text-sm select-all tracking-wide">4916217501611292</div>
                   <div className="text-[11px] text-slate-500 font-mono mt-0.5">Exp: 12/28 • CVV: 123</div>
                 </div>
                 <div className="bg-white p-2.5 rounded-xl border border-amber-100 shadow-xs">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">MasterCard (Success)</div>
-                  <div className="font-mono font-black text-slate-800 text-sm select-all tracking-wide">5200 8282 8282 8282</div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">MasterCard (PayHere Test)</div>
+                  <div className="font-mono font-black text-slate-800 text-sm select-all tracking-wide">5307732125531191</div>
                   <div className="text-[11px] text-slate-500 font-mono mt-0.5">Exp: 12/28 • CVV: 123</div>
                 </div>
               </div>

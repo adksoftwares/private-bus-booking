@@ -225,14 +225,27 @@ export async function requireTripOwnership(req: Request, tripId: string): Promis
   const user = await requireAuth(req);
   if (user.isAdmin) return user;
 
-  const supabase = getSupabaseAdminClient();
-  const { data: trip, error } = await supabase
-    .from('trips')
-    .select('owner_id')
-    .eq('id', tripId)
-    .maybeSingle();
+  let trip: { owner_id: string } | null = null;
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data } = await supabase
+      .from('trips')
+      .select('owner_id')
+      .eq('id', tripId)
+      .maybeSingle();
+    trip = data;
+  } catch {
+    const { getAuthenticatedRequestClient } = await import('@/lib/supabase/authenticated-client');
+    const supabase = getAuthenticatedRequestClient(req);
+    const { data } = await supabase
+      .from('trips')
+      .select('owner_id')
+      .eq('id', tripId)
+      .maybeSingle();
+    trip = data;
+  }
 
-  if (error || !trip) {
+  if (!trip) {
     throw new HttpError(404, 'Trip not found.');
   }
 
@@ -250,14 +263,27 @@ export async function requireTripStaffAssignment(req: Request, tripId: string): 
   const user = await requireAuth(req);
   if (user.isAdmin) return user;
 
-  const supabase = getSupabaseAdminClient();
-  const { data: trip, error: tripError } = await supabase
-    .from('trips')
-    .select('owner_id')
-    .eq('id', tripId)
-    .maybeSingle();
+  let trip: { owner_id: string } | null = null;
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data } = await supabase
+      .from('trips')
+      .select('owner_id')
+      .eq('id', tripId)
+      .maybeSingle();
+    trip = data;
+  } catch {
+    const { getAuthenticatedRequestClient } = await import('@/lib/supabase/authenticated-client');
+    const supabase = getAuthenticatedRequestClient(req);
+    const { data } = await supabase
+      .from('trips')
+      .select('owner_id')
+      .eq('id', tripId)
+      .maybeSingle();
+    trip = data;
+  }
 
-  if (tripError || !trip) {
+  if (!trip) {
     throw new HttpError(404, 'Trip schedule not found.');
   }
 
@@ -267,14 +293,29 @@ export async function requireTripStaffAssignment(req: Request, tripId: string): 
   }
 
   // Check staff_trip_assignments
-  const { data: assignment, error: assignError } = await supabase
-    .from('staff_trip_assignments')
-    .select('id, assigned_role')
-    .eq('trip_id', tripId)
-    .eq('staff_id', user.uid)
-    .maybeSingle();
+  let assignment: { id: number; assigned_role: string } | null = null;
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data } = await supabase
+      .from('staff_trip_assignments')
+      .select('id, assigned_role')
+      .eq('trip_id', tripId)
+      .eq('staff_id', user.uid)
+      .maybeSingle();
+    assignment = data;
+  } catch {
+    const { getAuthenticatedRequestClient } = await import('@/lib/supabase/authenticated-client');
+    const supabase = getAuthenticatedRequestClient(req);
+    const { data } = await supabase
+      .from('staff_trip_assignments')
+      .select('id, assigned_role')
+      .eq('trip_id', tripId)
+      .eq('staff_id', user.uid)
+      .maybeSingle();
+    assignment = data;
+  }
 
-  if (assignError || !assignment) {
+  if (!assignment) {
     throw new HttpError(403, 'Access denied: You are not assigned to this trip schedule.');
   }
 

@@ -36,7 +36,7 @@ export default function OwnerTripsPage() {
     let isMounted = true;
     const url = isAdmin ? '/api/trips' : `/api/trips?ownerId=${user.uid}`;
 
-    fetch(url)
+    authFetch(url)
       .then(res => res.json())
       .then(data => {
         if (isMounted) {

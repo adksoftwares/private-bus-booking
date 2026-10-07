@@ -18,7 +18,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
   const { user, authFetch } = useAuth();
   const [seatStatuses, setSeatStatuses] = useState<Record<string, SeatLock>>({});
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
-  const [processingSeat, setProcessingSeat] = useState<string | null>(null);
+  const inFlightSeatsRef = useRef<Set<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
   const [guestSessionId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -118,7 +118,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
 
     const pollInterval = setInterval(() => {
       fetchSeatStatuses();
-    }, 8000);
+    }, 15000);
 
     return () => {
       isCancelled = true;
@@ -127,8 +127,9 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     };
   }, [tripId, fetchSeatStatuses, effectiveUserId, authFetch]);
 
-  const handleSeatClick = async (seatId: string) => {
-    if (readOnly || !effectiveUserId || processingSeat) return;
+  const handleSeatClick = (seatId: string) => {
+    if (readOnly || !effectiveUserId) return;
+    if (inFlightSeatsRef.current.has(seatId)) return; // Prevent duplicate concurrent clicks on the same seat
 
     const status = seatStatuses[seatId];
     if (status?.status === 'booked') return;
@@ -138,87 +139,90 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
       return;
     }
 
-    setProcessingSeat(seatId);
+    const isAlreadySelected = selectedSeats.includes(seatId);
+    const fetcher = authFetch || fetch;
 
-    try {
-      const isAlreadySelected = selectedSeats.includes(seatId);
-      const fetcher = authFetch || fetch;
+    if (isAlreadySelected) {
+      // 1. Instant UI Deselection in 0ms
+      const updated = selectedSeats.filter(s => s !== seatId);
+      setSelectedSeats(updated);
+      setSeatStatuses(prev => {
+        const copy = { ...prev };
+        delete copy[seatId];
+        return copy;
+      });
+      if (onSeatSelect) onSeatSelect(updated);
 
-      if (isAlreadySelected) {
-        // Optimistic Deselection in 0ms
-        const updated = selectedSeats.filter(s => s !== seatId);
-        setSelectedSeats(updated);
-        setSeatStatuses(prev => {
-          const copy = { ...prev };
-          delete copy[seatId];
-          return copy;
+      // 2. Asynchronous background unlock
+      inFlightSeatsRef.current.add(seatId);
+      fetcher('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tripId,
+          seatId,
+          guestSessionId: effectiveUserId
+        })
+      })
+        .catch(err => console.warn("Background unlock failed:", err))
+        .finally(() => {
+          inFlightSeatsRef.current.delete(seatId);
         });
-        if (onSeatSelect) onSeatSelect(updated);
-
-        // Deselect -> Unlock seat via API
-        await fetcher('/api/seats/unlock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tripId,
-            seatId,
-            guestSessionId: effectiveUserId
-          })
-        });
-
-        await fetchSeatStatuses();
-      } else {
-        if (selectedSeats.length >= 6) {
-          alert("Maximum 6 seats allowed per reservation.");
-          return;
-        }
-
-        // Optimistic Selection in 0ms: highlight seat immediately
-        const updated = [...selectedSeats, seatId];
-        setSelectedSeats(updated);
-        setSeatStatuses(prev => ({
-          ...prev,
-          [seatId]: {
-            status: 'locked',
-            isMine: true,
-            userId: effectiveUserId,
-            expiresAt: Date.now() + 600000
-          }
-        }));
-        if (onSeatSelect) onSeatSelect(updated);
-
-        const res = await fetcher('/api/seats/lock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tripId,
-            seatId,
-            guestSessionId: effectiveUserId
-          })
-        });
-
-        const resData = await res.json();
-        if (!res.ok || !resData.success) {
-          // Revert optimistic selection on failure/conflict
-          setSelectedSeats(prev => prev.filter(s => s !== seatId));
-          setSeatStatuses(prev => {
-            const copy = { ...prev };
-            delete copy[seatId];
-            return copy;
-          });
-          if (onSeatSelect) onSeatSelect(selectedSeats.filter(s => s !== seatId));
-
-          alert(resData.message || resData.error || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
-          await fetchSeatStatuses();
-          return;
-        }
-
-        await fetchSeatStatuses();
+    } else {
+      if (selectedSeats.length >= 6) {
+        alert("Maximum 6 seats allowed per reservation.");
+        return;
       }
-    } catch (err) {
-      console.error("Seat reservation error:", err);
-    } finally {
-      setProcessingSeat(null);
+
+      // 1. Instant UI Selection in 0ms: highlight seat immediately
+      const updated = [...selectedSeats, seatId];
+      setSelectedSeats(updated);
+      setSeatStatuses(prev => ({
+        ...prev,
+        [seatId]: {
+          status: 'locked',
+          isMine: true,
+          userId: effectiveUserId,
+          expiresAt: Date.now() + 600000
+        }
+      }));
+      if (onSeatSelect) onSeatSelect(updated);
+
+      // 2. Asynchronous background lock
+      inFlightSeatsRef.current.add(seatId);
+      fetcher('/api/seats/lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tripId,
+          seatId,
+          guestSessionId: effectiveUserId
+        })
+      })
+        .then(async res => {
+          const resData = await res.json();
+          if (!res.ok || !resData.success) {
+            // Revert optimistic selection on failure/conflict
+            setSelectedSeats(prev => prev.filter(s => s !== seatId));
+            setSeatStatuses(prev => {
+              const copy = { ...prev };
+              delete copy[seatId];
+              return copy;
+            });
+            if (onSeatSelectRef.current) {
+              onSeatSelectRef.current(selectedSeats.filter(s => s !== seatId));
+            }
+
+            alert(resData.message || resData.error || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
+            fetchSeatStatuses();
+          }
+        })
+        .catch(err => {
+          console.error("Seat reservation error:", err);
+        })
+        .finally(() => {
+          inFlightSeatsRef.current.delete(seatId);
+        });
     }
   };
 
@@ -309,7 +313,6 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           const isLockedByMe = statusInfo?.status === 'locked' && Boolean(statusInfo.isMine || statusInfo.userId === effectiveUserId);
           const isLockedByOther = statusInfo?.status === 'locked' && !statusInfo.isMine && statusInfo.userId !== effectiveUserId && Boolean(statusInfo.expiresAt && statusInfo.expiresAt > now);
           const isSelected = selectedSeats.includes(seatId);
-          const isProcessing = processingSeat === seatId;
           
           let seatStyle = 'bg-white border-slate-300 text-slate-800 hover:border-orange-500 hover:shadow-sm';
           
@@ -333,7 +336,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
               type="button"
               disabled={readOnly || isBooked || isLockedByOther}
               onClick={() => handleSeatClick(seatId)}
-              className={`${seatSize} relative flex flex-col items-center justify-between py-1.5 px-0.5 border-2 rounded-t-xl rounded-b-md transition-all duration-150 shrink-0 ${seatStyle} ${(!isBooked && !isLockedByOther) ? 'active:scale-95 cursor-pointer' : ''}`}
+              className={`${seatSize} relative flex flex-col items-center justify-between py-1.5 px-0.5 border-2 rounded-t-xl rounded-b-md transition-all duration-75 shrink-0 ${seatStyle} ${(!isBooked && !isLockedByOther) ? 'active:scale-95 cursor-pointer' : ''}`}
               title={`${seatId} • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
             >
               {/* Headrest curve top accent */}
@@ -344,10 +347,8 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
               </span>
               
               <div className="flex items-center gap-0.5 leading-none">
-                {isProcessing ? (
-                  <div className={`w-3 h-3 border-2 ${isSelected ? 'border-white' : 'border-orange-500'} border-t-transparent rounded-full animate-spin`} />
-                ) : isSelected ? (
-                  <Check className="w-3 h-3 stroke-[3] text-white" />
+                {isSelected ? (
+                  <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
                 ) : (
                   <span className={`text-[8.5px] font-black uppercase ${
                     seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'

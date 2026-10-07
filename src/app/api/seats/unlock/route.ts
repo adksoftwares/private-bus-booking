@@ -14,13 +14,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'tripId and seatId are required' }, { status: 400 });
     }
 
-    const user = await getAuthenticatedUser(req);
-    const effectiveUserId = user?.uid || guestSessionId || '';
+    let effectiveUserId = guestSessionId || '';
+    let isAdmin = false;
+    const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const user = await getAuthenticatedUser(req);
+      if (user?.uid) effectiveUserId = user.uid;
+      if (user?.isAdmin) isAdmin = true;
+    }
 
     const supabase = getSupabaseAdminClient();
 
     // Release lock authoritatively using unlock_seat_atomic RPC
-    const callerId = user?.isAdmin ? 'admin' : (effectiveUserId || '');
+    const callerId = isAdmin ? 'admin' : (effectiveUserId || '');
     const { error: rpcError } = await supabase.rpc('unlock_seat_atomic', {
       p_trip_id: tripId,
       p_seat_id: seatId,

@@ -16,8 +16,12 @@ export async function POST(req: Request) {
     }
 
     const seatsToLock: string[] = seatIds || [seatId];
-    const user = await getAuthenticatedUser(req);
-    const effectiveUserId = user?.uid || guestSessionId || 'anonymous_guest';
+    let effectiveUserId = guestSessionId || 'anonymous_guest';
+    const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const user = await getAuthenticatedUser(req);
+      if (user?.uid) effectiveUserId = user.uid;
+    }
 
     const lockResult = await atomicLockSeats(tripId, seatsToLock, effectiveUserId);
 

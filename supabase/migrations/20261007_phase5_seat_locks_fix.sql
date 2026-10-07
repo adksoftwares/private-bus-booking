@@ -369,7 +369,131 @@ BEGIN
 END;
 $$;
 
--- 4. Grant permissions for all atomic security definer functions to anon, authenticated, and service_role
+-- 4. Secure booking lookup for guest checkouts & passenger tickets
+CREATE OR REPLACE FUNCTION public.lookup_booking_atomic(
+    p_reference TEXT,
+    p_access_token TEXT DEFAULT NULL,
+    p_caller_user_id TEXT DEFAULT NULL,
+    p_phone TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+AS $$
+DECLARE
+    v_clean_ref TEXT := TRIM(p_reference);
+    v_booking RECORD;
+    v_trip RECORD;
+    v_is_strongly_auth BOOLEAN := FALSE;
+    v_is_phone_auth BOOLEAN := FALSE;
+    v_token_hash TEXT;
+    v_norm_phone TEXT;
+    v_norm_passenger_phone TEXT;
+BEGIN
+    IF v_clean_ref IS NULL OR v_clean_ref = '' THEN
+        RETURN jsonb_build_object('success', false, 'reason', 'missing_reference', 'message', 'Booking reference or Order ID is required.');
+    END IF;
+
+    SELECT * INTO v_booking
+    FROM public.bookings
+    WHERE id = v_clean_ref OR booking_reference = v_clean_ref;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'reason', 'not_found', 'message', 'Booking #' || v_clean_ref || ' was not found.');
+    END IF;
+
+    -- Authorization check
+    IF p_access_token IS NOT NULL AND p_access_token <> '' THEN
+        v_token_hash := encode(extensions.digest(p_access_token::bytea, 'sha256'::text), 'hex');
+        IF (v_booking.access_token_hash IS NOT NULL AND (v_booking.access_token_hash = v_token_hash OR v_booking.access_token_hash = p_access_token))
+           OR (v_booking.access_token IS NOT NULL AND (v_booking.access_token = p_access_token OR v_booking.access_token = v_token_hash)) THEN
+            v_is_strongly_auth := TRUE;
+        END IF;
+    END IF;
+
+    IF NOT v_is_strongly_auth AND p_caller_user_id IS NOT NULL AND v_booking.user_id IS NOT NULL AND p_caller_user_id = v_booking.user_id::text THEN
+        v_is_strongly_auth := TRUE;
+    END IF;
+
+    IF NOT v_is_strongly_auth AND p_phone IS NOT NULL AND p_phone <> '' THEN
+        -- Normalize phone numbers
+        v_norm_phone := regexp_replace(p_phone, '[^0-9]', '', 'g');
+        v_norm_passenger_phone := regexp_replace(COALESCE(v_booking.passenger_phone, ''), '[^0-9]', '', 'g');
+        IF v_norm_phone LIKE '94%' AND length(v_norm_phone) >= 11 THEN
+            v_norm_phone := '0' || SUBSTRING(v_norm_phone FROM 3);
+        ELSIF length(v_norm_phone) = 9 AND NOT v_norm_phone LIKE '0%' THEN
+            v_norm_phone := '0' || v_norm_phone;
+        END IF;
+        IF v_norm_passenger_phone LIKE '94%' AND length(v_norm_passenger_phone) >= 11 THEN
+            v_norm_passenger_phone := '0' || SUBSTRING(v_norm_passenger_phone FROM 3);
+        ELSIF length(v_norm_passenger_phone) = 9 AND NOT v_norm_passenger_phone LIKE '0%' THEN
+            v_norm_passenger_phone := '0' || v_norm_passenger_phone;
+        END IF;
+
+        IF v_norm_phone = v_norm_passenger_phone AND length(v_norm_phone) >= 9 THEN
+            v_is_phone_auth := TRUE;
+        END IF;
+    END IF;
+
+    IF NOT v_is_strongly_auth AND NOT v_is_phone_auth THEN
+        RETURN jsonb_build_object(
+            'success', false, 
+            'reason', 'auth_required', 
+            'message', 'Access verification required. Please verify with passenger phone number or access token.'
+        );
+    END IF;
+
+    -- Fetch trip snapshot or trip record
+    SELECT * INTO v_trip FROM public.trips WHERE id = v_booking.trip_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'booking', jsonb_build_object(
+            'id', v_booking.id,
+            'bookingReference', v_booking.booking_reference,
+            'accessToken', '', -- Never expose accessToken
+            'bookingType', v_booking.booking_type,
+            'tripId', v_booking.trip_id,
+            'userId', v_booking.user_id,
+            'ownerId', v_booking.owner_id,
+            'passengerName', v_booking.passenger_name,
+            'passengerPhone', v_booking.passenger_phone,
+            'passengerEmail', v_booking.passenger_email,
+            'passengerDetails', v_booking.passenger_details,
+            'seats', to_jsonb(v_booking.seats),
+            'totalAmount', v_booking.total_amount,
+            'fares', v_booking.fares,
+            'status', v_booking.status,
+            'boarded', v_booking.boarded,
+            'boardedAt', CASE WHEN v_booking.boarded_at IS NOT NULL THEN EXTRACT(EPOCH FROM v_booking.boarded_at) * 1000 ELSE NULL END,
+            'boardedBy', v_booking.boarded_by,
+            'paymentId', v_booking.payment_id,
+            'refundId', v_booking.refund_id,
+            'tripSnapshot', COALESCE(to_jsonb(v_booking.trip_snapshot), '{}'::jsonb),
+            'createdAt', EXTRACT(EPOCH FROM v_booking.created_at) * 1000
+        ),
+        'trip', CASE WHEN v_trip.id IS NOT NULL THEN jsonb_build_object(
+            'id', v_trip.id,
+            'busId', v_trip.bus_id,
+            'ownerId', v_trip.owner_id,
+            'routeId', v_trip.route_id,
+            'routeSnapshot', v_trip.route_snapshot,
+            'busSnapshot', v_trip.bus_snapshot,
+            'departureDate', v_trip.departure_date,
+            'departureTime', v_trip.departure_time,
+            'arrivalTime', v_trip.arrival_time,
+            'duration', v_trip.duration,
+            'baseFare', v_trip.base_fare,
+            'farePerSeat', v_trip.fare_per_seat,
+            'operatorName', v_trip.operator_name,
+            'status', v_trip.status
+        ) ELSE COALESCE(to_jsonb(v_booking.trip_snapshot), '{}'::jsonb) END
+    );
+END;
+$$;
+
+-- 5. Grant permissions for all atomic security definer functions to anon, authenticated, and service_role
 GRANT EXECUTE ON FUNCTION public.lock_seats_atomic TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.unlock_seat_atomic TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.board_passenger_atomic TO anon, authenticated, service_role;
@@ -378,4 +502,6 @@ GRANT EXECUTE ON FUNCTION public.create_pending_booking_atomic TO anon, authenti
 GRANT EXECUTE ON FUNCTION public.confirm_booking_seats_atomic TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.process_payment_webhook_atomic TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.cancel_booking_atomic TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.lookup_booking_atomic TO anon, authenticated, service_role;
 GRANT SELECT ON public.seat_locks TO anon, authenticated, service_role;
+

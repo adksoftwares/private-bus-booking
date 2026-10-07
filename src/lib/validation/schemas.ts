@@ -39,9 +39,13 @@ export const cancelBookingSchema = z.object({
 });
 
 export const lookupBookingSchema = z.object({
-  reference: z.string().trim().min(1, 'Booking reference or Order ID is required'),
+  reference: z.string().trim().optional(),
+  bookingId: z.string().trim().optional(),
   accessToken: z.string().optional(),
   phone: z.string().optional()
+}).refine(data => Boolean((data.reference && data.reference.length > 0) || (data.bookingId && data.bookingId.length > 0)), {
+  message: 'Booking reference or Order ID is required',
+  path: ['reference']
 });
 
 export const linkAccountSchema = z.object({

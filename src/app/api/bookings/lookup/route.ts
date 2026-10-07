@@ -10,13 +10,14 @@ export async function POST(req: Request) {
     enforceRateLimit(req, 'lookup-booking', 30, 60);
 
     const body = await req.json();
-    const { reference, phone, accessToken } = lookupBookingSchema.parse(body);
+    const { reference, bookingId, phone, accessToken } = lookupBookingSchema.parse(body);
+    const targetRef = (reference || bookingId)!.trim();
 
     const authenticatedUser = await getAuthenticatedUser(req);
 
     // 2. Delegate lookup and authorization to domain service
     const { booking, trip } = await lookupBookingByReference(
-      reference,
+      targetRef,
       accessToken,
       authenticatedUser?.uid,
       phone

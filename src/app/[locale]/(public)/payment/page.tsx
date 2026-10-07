@@ -42,18 +42,20 @@ export default function PaymentPage() {
       try {
         let orderId = urlOrderId;
         let accessToken = searchParams.get('token') || '';
-        if (!orderId) {
-          const savedDraft = sessionStorage.getItem('bookingDraft');
-          if (savedDraft) {
-            try {
-              const parsed = JSON.parse(savedDraft);
-              orderId = parsed.orderId;
-              if (!accessToken && parsed.accessToken) {
-                accessToken = parsed.accessToken;
-              }
-            } catch (e) {
-              console.error("Failed to parse bookingDraft:", e);
+        const savedDraft = typeof window !== 'undefined' ? sessionStorage.getItem('bookingDraft') : null;
+        let draftObj: any = null;
+
+        if (savedDraft) {
+          try {
+            draftObj = JSON.parse(savedDraft);
+            if (!orderId && draftObj.orderId) {
+              orderId = draftObj.orderId;
             }
+            if (!accessToken && draftObj.accessToken) {
+              accessToken = draftObj.accessToken;
+            }
+          } catch (e) {
+            console.error("Failed to parse bookingDraft:", e);
           }
         }
 
@@ -62,11 +64,32 @@ export default function PaymentPage() {
           return;
         }
 
+        // Instant optimistic render from draft so user sees checkout card with zero spinner
+        if (draftObj && (draftObj.orderId === orderId || draftObj.bookingReference === orderId)) {
+          setBooking({
+            id: draftObj.orderId,
+            bookingReference: draftObj.bookingReference,
+            accessToken: draftObj.accessToken,
+            bookingType: draftObj.bookingType,
+            tripId: draftObj.tripId,
+            passengerName: draftObj.passengerDetails?.name || '',
+            passengerPhone: draftObj.passengerDetails?.phone || '',
+            passengerEmail: draftObj.passengerDetails?.email || '',
+            passengerDetails: draftObj.passengerDetails,
+            seats: draftObj.selectedSeats,
+            totalAmount: draftObj.totalAmount,
+            status: 'pending',
+            tripSnapshot: draftObj.tripSnapshot
+          } as unknown as Booking);
+          setInitializing(false);
+        }
+
         // Authoritative server verification
         const res = await authFetch('/api/bookings/lookup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            reference: orderId,
             bookingId: orderId,
             accessToken: accessToken || undefined
           })
@@ -76,12 +99,15 @@ export default function PaymentPage() {
           const data = await res.json();
           if (data.booking) {
             setBooking(data.booking);
+            setError('');
             setInitializing(false);
             return;
           }
         }
 
-        setError("Booking reservation not found or expired.");
+        if (!draftObj) {
+          setError("Booking reservation not found or expired.");
+        }
       } catch (err: unknown) {
         console.error("Error loading booking for payment:", err);
         setError("Failed to load booking details.");
@@ -105,12 +131,29 @@ export default function PaymentPage() {
     setError('');
 
     try {
+      let rawToken = booking.accessToken || searchParams.get('token') || '';
+      if (!rawToken && typeof window !== 'undefined') {
+        rawToken = localStorage.getItem(`ticket_token_${booking.id}`) || '';
+        if (!rawToken && booking.bookingReference) {
+          rawToken = localStorage.getItem(`ticket_token_${booking.bookingReference}`) || '';
+        }
+        if (!rawToken) {
+          try {
+            const draft = JSON.parse(sessionStorage.getItem('bookingDraft') || '{}');
+            rawToken = draft.accessToken || '';
+          } catch {
+            // ignore
+          }
+        }
+      }
+
       // 1. Request secure payment hash from our authoritative server endpoint
       const response = await authFetch('/api/payhere/hash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orderId: booking.id
+          orderId: booking.id,
+          accessToken: rawToken || undefined
         })
       });
 
@@ -123,8 +166,8 @@ export default function PaymentPage() {
       const { hash, merchantId, formattedAmount, currency } = hashData;
 
       // 2. Configure PayHere official checkout payload
-      const tokenParam = booking.accessToken ? `?token=${booking.accessToken}` : '';
-      const returnUrl = `${window.location.origin}/ticket/${booking.id}${tokenParam}`;
+      const returnTokenQuery = rawToken ? `?token=${rawToken}` : '';
+      const returnUrl = `${window.location.origin}/ticket/${booking.id}${returnTokenQuery}`;
       const notifyUrl = `${window.location.origin}/api/payhere/notify`;
 
       const paymentObj = {
@@ -152,7 +195,7 @@ export default function PaymentPage() {
       if (typeof window !== 'undefined' && window.payhere) {
         window.payhere.onCompleted = function onCompleted() {
           sessionStorage.removeItem('bookingDraft');
-          router.push(`/ticket/${booking.id}${tokenParam}`);
+          router.push(`/ticket/${booking.id}${returnTokenQuery}`);
         };
 
         window.payhere.onDismissed = function onDismissed() {

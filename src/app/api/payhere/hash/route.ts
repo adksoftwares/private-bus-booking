@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { DEFAULT_CURRENCY } from '@/lib/constants';
+import { lookupBookingByReference } from '@/lib/services/booking-service';
 
 export async function POST(req: Request) {
   try {
@@ -29,19 +30,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Fetch authoritative booking from Supabase using Admin client
-    const supabase = getSupabaseAdminClient();
-    const { data: booking, error: bookingError } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('id', orderId)
-      .maybeSingle();
+    // 3. Authenticate caller server-side
+    const authUser = await getAuthenticatedUser(req);
 
-    if (bookingError || !booking) {
-      return NextResponse.json({ error: 'Booking not found for orderId' }, { status: 404 });
+    // 4. Fetch authoritative booking and verify authorization via secure atomic lookup
+    let booking;
+    try {
+      const result = await lookupBookingByReference(orderId, accessToken, authUser?.uid);
+      booking = result.booking;
+    } catch (lookupErr: unknown) {
+      const err = lookupErr as { statusCode?: number; message?: string };
+      const status = err.statusCode || 404;
+      return NextResponse.json({ error: err.message || 'Booking not found for orderId' }, { status });
     }
 
-    // 4. Strict State Machine: Payment hash can ONLY be generated for pending reservations
+    // 5. Strict State Machine: Payment hash can ONLY be generated for pending reservations
     if (booking.status !== 'pending') {
       return NextResponse.json(
         { error: `Cannot initiate payment for booking with status '${booking.status}'. Only pending reservations can be paid.` },
@@ -49,33 +52,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Booking Authorization Check
-    const authUser = await getAuthenticatedUser(req);
-    if (booking.user_id) {
-      if (!authUser || (authUser.uid !== booking.user_id && authUser.role !== 'Admin')) {
-        return NextResponse.json(
-          { error: 'Access denied: You do not have permission to pay for this reservation.' },
-          { status: 403 }
-        );
-      }
-    } else {
-      // Guest booking: If an accessToken was passed, verify authenticity
-      if (accessToken) {
-        const providedHash = crypto.createHash('sha256').update(accessToken).digest('hex');
-        const storedHash = (booking as Record<string, unknown>).access_token_hash as string | undefined;
-        const storedToken = booking.access_token;
-        const matches =
-          (storedHash && (storedHash === providedHash || storedHash === accessToken)) ||
-          (storedToken && (storedToken === accessToken || storedToken === providedHash));
-
-        if (!matches) {
-          return NextResponse.json({ error: 'Invalid access token for this guest reservation.' }, { status: 403 });
-        }
-      }
-    }
-
     // 6. Authoritative amount derived directly from server record
-    const amount = Number(booking.total_amount);
+    const amount = Number(booking.totalAmount);
     if (!amount || isNaN(amount) || amount <= 0) {
       return NextResponse.json({ error: 'Invalid booking ticket amount' }, { status: 400 });
     }

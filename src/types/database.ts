@@ -614,6 +614,21 @@ export interface Database {
         };
         Returns: Json;
       };
+      lookup_booking_atomic: {
+        Args: {
+          p_reference: string;
+          p_access_token?: string | null;
+          p_caller_user_id?: string | null;
+          p_phone?: string | null;
+        };
+        Returns: {
+          success: boolean;
+          reason?: string;
+          message?: string;
+          booking?: Record<string, unknown>;
+          trip?: Record<string, unknown>;
+        };
+      };
       get_trip_seat_availability: {
         Args: {
           p_trip_id: string;

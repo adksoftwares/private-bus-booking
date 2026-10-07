@@ -280,133 +280,39 @@ export async function lookupBookingByReference(
   const supabase = getSupabaseAdminClient();
   const cleanRef = reference.trim();
 
-  // Query by id OR booking_reference
-  const { data: bookingData, error: bookingError } = await supabase
-    .from('bookings')
-    .select('*')
-    .or(`id.eq.${cleanRef},booking_reference.eq.${cleanRef}`)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('lookup_booking_atomic', {
+    p_reference: cleanRef,
+    p_access_token: accessToken || null,
+    p_caller_user_id: authenticatedUserId || null,
+    p_phone: providedPhone || null,
+  });
 
-  if (bookingError || !bookingData) {
-    throw new HttpError(404, `Booking #${cleanRef} was not found.`);
+  if (error) {
+    console.error('lookup_booking_atomic error:', error);
+    throw new HttpError(500, error.message || 'Failed to lookup booking');
   }
 
-  const booking = {
-    id: bookingData.id,
-    bookingReference: bookingData.booking_reference,
-    accessToken: bookingData.access_token,
-    bookingType: bookingData.booking_type,
-    tripId: bookingData.trip_id,
-    userId: bookingData.user_id,
-    ownerId: bookingData.owner_id,
-    passengerName: bookingData.passenger_name,
-    passengerPhone: bookingData.passenger_phone,
-    passengerEmail: bookingData.passenger_email || undefined,
-    passengerDetails: bookingData.passenger_details as Record<string, unknown>,
-    seats: bookingData.seats,
-    totalAmount: Number(bookingData.total_amount),
-    fares: bookingData.fares as Record<string, unknown>,
-    status: bookingData.status,
-    boarded: bookingData.boarded,
-    boardedAt: bookingData.boarded_at ? new Date(bookingData.boarded_at).getTime() : undefined,
-    boardedBy: bookingData.boarded_by || undefined,
-    paymentId: bookingData.payment_id || undefined,
-    refundId: bookingData.refund_id || undefined,
-    tripSnapshot: bookingData.trip_snapshot as Record<string, unknown>,
-    createdAt: new Date(bookingData.created_at).getTime()
-  } as unknown as Booking;
-
-  // Authorization Check
-  let isStronglyAuthorized = false;
-  let isPhoneAuthorized = false;
-
-  if (accessToken) {
-    const providedHash = crypto.createHash('sha256').update(accessToken).digest('hex');
-    const storedHash = (bookingData as Record<string, unknown>).access_token_hash as string | undefined;
-    const storedToken = bookingData.access_token;
-    if (
-      (storedHash && (storedHash === providedHash || storedHash === accessToken)) ||
-      (storedToken && (storedToken === accessToken || storedToken === providedHash))
-    ) {
-      isStronglyAuthorized = true;
+  if (!data || !data.success) {
+    if (data?.reason === 'not_found') {
+      throw new HttpError(404, data.message || `Booking #${cleanRef} was not found.`);
     }
-  } else if (authenticatedUserId && booking.userId && authenticatedUserId === booking.userId) {
-    isStronglyAuthorized = true;
-  } else if (providedPhone) {
-    const normProvided = normalizeSriLankanPhone(providedPhone);
-    const normPassenger = normalizeSriLankanPhone(booking.passengerPhone || '');
-    if (normProvided && normPassenger && normProvided === normPassenger) {
-      isPhoneAuthorized = true;
+    if (data?.reason === 'auth_required') {
+      throw new HttpError(403, data.message || 'Access verification required. Please verify with the passenger phone number or access token.');
     }
+    throw new HttpError(400, data?.message || 'Invalid booking lookup request.');
   }
 
-  if (!isStronglyAuthorized && !isPhoneAuthorized) {
-    throw new HttpError(
-      403,
-      'Access verification required. Please verify with the passenger phone number or access token.'
-    );
-  }
-
-  // Prevent token leakage: Never expose access token or hash in the lookup response
-  booking.accessToken = '';
+  const booking = data.booking as unknown as Booking;
+  const trip = data.trip as unknown as Trip;
 
   // Data Minimization: Strip internal financial commissions and operator margins from passenger lookup
   if (booking.fares) {
     booking.fares = {
       ticketAmount: booking.fares.ticketAmount,
       serviceFee: booking.fares.serviceFee,
-      total: booking.fares.total || booking.totalAmount
+      total: booking.fares.total || booking.totalAmount,
     };
   }
-
-  // Privacy Protection: When verified only via phone (without secret token or account credentials),
-  // mask PII to protect against passenger phone enumeration / scraping
-  if (!isStronglyAuthorized) {
-    if (booking.passengerEmail) {
-      const parts = booking.passengerEmail.split('@');
-      const namePart = parts[0] || '';
-      const domainPart = parts[1] || '';
-      const maskedName = namePart.length > 2
-        ? `${namePart[0]}***${namePart[namePart.length - 1]}`
-        : `${namePart[0]}***`;
-      booking.passengerEmail = `${maskedName}@${domainPart}`;
-    }
-    if (booking.passengerPhone) {
-      const p = booking.passengerPhone;
-      booking.passengerPhone = p.length > 4 ? `${p.slice(0, 3)}****${p.slice(-3)}` : '****';
-    }
-    if (booking.passengerDetails) {
-      booking.passengerDetails = {
-        ...booking.passengerDetails,
-        phone: booking.passengerPhone,
-        email: booking.passengerEmail
-      };
-    }
-  }
-
-  // Fetch full trip details
-  const { data: tripData } = await supabase
-    .from('trips')
-    .select('*')
-    .eq('id', booking.tripId)
-    .maybeSingle();
-
-  const trip = tripData ? ({
-    id: tripData.id,
-    busId: tripData.bus_id,
-    ownerId: tripData.owner_id,
-    routeId: tripData.route_id || '',
-    routeSnapshot: tripData.route_snapshot,
-    busSnapshot: tripData.bus_snapshot,
-    departureDate: tripData.departure_date,
-    departureTime: tripData.departure_time,
-    arrivalTime: tripData.arrival_time,
-    duration: tripData.duration,
-    baseFare: tripData.base_fare,
-    farePerSeat: tripData.fare_per_seat,
-    operatorName: tripData.operator_name,
-    status: tripData.status
-  } as unknown as Trip) : (booking.tripSnapshot as unknown as Trip);
 
   return { booking, trip };
 }

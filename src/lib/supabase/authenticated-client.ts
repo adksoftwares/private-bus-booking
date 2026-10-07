@@ -9,10 +9,16 @@ import { Database } from '@/types/database';
  * to a client authenticated with the user's incoming Bearer token, which operates safely under Row Level Security.
  */
 export function getAuthenticatedRequestClient(req?: Request) {
-  try {
-    return getSupabaseAdminClient();
-  } catch {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (serviceRoleKey && !serviceRoleKey.includes('placeholder')) {
+    try {
+      return getSupabaseAdminClient();
+    } catch {
+      // fallback to user request client
+    }
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
     let bearerToken = '';
@@ -27,5 +33,4 @@ export function getAuthenticatedRequestClient(req?: Request) {
       auth: { persistSession: false, autoRefreshToken: false },
       global: bearerToken ? { headers: { Authorization: `Bearer ${bearerToken}` } } : undefined
     });
-  }
 }

@@ -22,6 +22,33 @@ export interface AuthenticatedUser {
   isPassenger: boolean;
 }
 
+interface CachedAuthUser {
+  user: AuthenticatedUser;
+  expiresAt: number;
+}
+
+const authUserCache = new Map<string, CachedAuthUser>();
+
+function getCachedAuthUser(token: string): AuthenticatedUser | null {
+  const cached = authUserCache.get(token);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    authUserCache.delete(token);
+    return null;
+  }
+  return cached.user;
+}
+
+function setCachedAuthUser(token: string, user: AuthenticatedUser, ttlSeconds = 60): void {
+  if (authUserCache.size > 1000) {
+    authUserCache.clear();
+  }
+  authUserCache.set(token, {
+    user,
+    expiresAt: Date.now() + ttlSeconds * 1000
+  });
+}
+
 /**
  * Extracts and verifies the Supabase Auth access token from the Authorization header or cookies.
  * Derives user identity strictly on the server (anti-spoofing).
@@ -37,6 +64,11 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
     if (authHeader && authHeader.startsWith('Bearer ')) {
       bearerToken = authHeader.substring(7).trim();
       if (bearerToken) {
+        const cached = getCachedAuthUser(bearerToken);
+        if (cached) {
+          return cached;
+        }
+
         // 1. Authoritative verification using standard anon key (doesn't fail if service role is missing)
         try {
           const authClient = createSupabaseClient<Database>(supabaseUrl, supabaseAnonKey, {
@@ -145,7 +177,7 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
       }
     }
 
-    return {
+    const authenticatedUser: AuthenticatedUser = {
       uid,
       email,
       phone: (profileData?.phone ?? phone) || undefined,
@@ -156,6 +188,12 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
       isConductor: role === 'Conductor' || role === 'Owner' || role === 'Admin',
       isPassenger: role === 'Passenger'
     };
+
+    if (bearerToken) {
+      setCachedAuthUser(bearerToken, authenticatedUser, 60);
+    }
+
+    return authenticatedUser;
   } catch {
     // If token is invalid or expired, return null
     return null;

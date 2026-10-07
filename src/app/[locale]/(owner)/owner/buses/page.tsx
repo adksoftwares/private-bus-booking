@@ -126,7 +126,7 @@ export default function FleetPage() {
     }
   };
 
-  if (authLoading || (loading && user)) {
+  if (authLoading && !user) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[70vh] flex flex-col items-center justify-center">
         <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-3"></div>

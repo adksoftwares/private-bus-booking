@@ -43,7 +43,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const resolveUserRole = useCallback(async (userId: string): Promise<UserRole> => {
+  const resolveUserRole = useCallback(async (userId: string, skipCache = false): Promise<UserRole> => {
+    if (!skipCache && typeof window !== 'undefined') {
+      try {
+        const cached = sessionStorage.getItem(`user_role_${userId}`);
+        if (cached && ['Passenger', 'Owner', 'Conductor', 'Admin'].includes(cached)) {
+          return cached as UserRole;
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
     try {
       // 1. Check profiles table in Supabase
       const { data: profile } = await supabase
@@ -53,7 +64,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (profile?.role) {
-        return profile.role as UserRole;
+        const r = profile.role as UserRole;
+        if (typeof window !== 'undefined') {
+          try { sessionStorage.setItem(`user_role_${userId}`, r); } catch {}
+        }
+        return r;
       }
 
       // 2. Check owners table
@@ -64,6 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (owner) {
+        if (typeof window !== 'undefined') {
+          try { sessionStorage.setItem(`user_role_${userId}`, 'Owner'); } catch {}
+        }
         return 'Owner';
       }
 
@@ -76,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshRole = async () => {
     if (!user) return;
-    const resolvedRole = await resolveUserRole(user.uid);
+    const resolvedRole = await resolveUserRole(user.uid, true);
     setRole(resolvedRole);
   };
 

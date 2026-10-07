@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireOwner } from '@/lib/auth-server';
 import { createTripSchema, formatZodError } from '@/lib/validation/schemas';
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
           if (!locksMap[lock.trip_id]) locksMap[lock.trip_id] = {};
           locksMap[lock.trip_id][lock.seat_id] = {
             status: lock.status as BookedSeatInfo['status'],
-            uid: lock.user_id
+            uid: 'masked'
           };
         }
       }
@@ -166,7 +167,7 @@ export async function POST(req: Request) {
       }], { onConflict: 'id' });
 
     // 6. Generate Trip ID & Record
-    const tripId = `TRIP-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+    const tripId = `TRIP-${crypto.randomUUID()}`;
     const finalFare = Number(farePerSeat);
 
     const tripRecord = {

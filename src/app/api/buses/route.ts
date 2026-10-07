@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireOwner } from '@/lib/auth-server';
 import { Bus } from '@/types/bus';
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
     }
 
     const supabase = getSupabaseAdminClient();
-    const busId = `BUS-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+    const busId = `BUS-${crypto.randomUUID()}`;
 
     const { error: insertError } = await supabase
       .from('buses')

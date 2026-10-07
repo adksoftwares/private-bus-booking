@@ -19,23 +19,17 @@ export async function POST(req: Request) {
 
     const supabase = getSupabaseAdminClient();
 
-    // Release lock if it belongs to this user and is still 'locked'
-    let query = supabase
-      .from('seat_locks')
-      .delete()
-      .eq('trip_id', tripId)
-      .eq('seat_id', seatId)
-      .eq('status', 'locked');
+    // Release lock authoritatively using unlock_seat_atomic RPC
+    const callerId = user?.isAdmin ? 'admin' : (effectiveUserId || '');
+    const { error: rpcError } = await supabase.rpc('unlock_seat_atomic', {
+      p_trip_id: tripId,
+      p_seat_id: seatId,
+      p_user_id: callerId
+    });
 
-    if (effectiveUserId) {
-      query = query.eq('user_id', effectiveUserId);
-    }
-
-    const { error } = await query;
-
-    if (error) {
-      console.error("Seat unlock error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (rpcError) {
+      console.error("Seat unlock RPC error:", rpcError);
+      return NextResponse.json({ error: rpcError.message }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, releasedSeat: seatId });

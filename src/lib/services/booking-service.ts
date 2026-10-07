@@ -107,86 +107,37 @@ export async function atomicLockSeats(
   }
 
   const supabase = getSupabaseAdminClient();
-  const nowIso = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + SEAT_LOCK_DURATION_MS).toISOString();
 
-  // Try PostgreSQL RPC function first
-  try {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('lock_seats_atomic', {
-      p_trip_id: tripId,
-      p_seat_ids: seatIds,
-      p_user_id: effectiveUserId,
-      p_booking_id: orderId,
-      p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000)
-    });
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('lock_seats_atomic', {
+    p_trip_id: tripId,
+    p_seat_ids: seatIds,
+    p_user_id: effectiveUserId,
+    p_booking_id: orderId,
+    p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000)
+  });
 
-    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
-      const res = rpcResult as { success: boolean; conflicting_seat?: string };
-      if (!res.success) {
-        return { success: false, conflictingSeat: res.conflicting_seat };
-      }
-      return { success: true };
-    }
-  } catch {
-    // If RPC is unavailable, fall back to atomic direct query
-  }
-
-  // Fallback: direct query with cleanup of expired locks
-  await supabase
-    .from('seat_locks')
-    .delete()
-    .eq('trip_id', tripId)
-    .eq('status', 'locked')
-    .lt('expires_at', nowIso);
-
-  // Check existing locks
-  const { data: existingLocks } = await supabase
-    .from('seat_locks')
-    .select('seat_id, user_id, status, expires_at')
-    .eq('trip_id', tripId)
-    .in('seat_id', seatIds);
-
-  if (existingLocks && existingLocks.length > 0) {
-    for (const lock of existingLocks) {
-      if (lock.status === 'booked') {
-        return { success: false, conflictingSeat: lock.seat_id };
-      }
-      if (lock.status === 'locked' && lock.user_id !== effectiveUserId) {
-        if (!lock.expires_at || new Date(lock.expires_at).getTime() > Date.now()) {
-          return { success: false, conflictingSeat: lock.seat_id };
-        }
-      }
-    }
-  }
-
-  // Insert or update seat locks
-  const lockRecords = seatIds.map(seatId => ({
-    trip_id: tripId,
-    seat_id: seatId,
-    user_id: effectiveUserId,
-    booking_id: orderId,
-    status: 'locked' as const,
-    created_at: nowIso,
-    expires_at: expiresAt
-  }));
-
-  const { error: upsertError } = await supabase
-    .from('seat_locks')
-    .upsert(lockRecords, { onConflict: 'trip_id,seat_id' });
-
-  if (upsertError) {
-    console.error("Lock seat upsert error:", upsertError);
+  if (rpcError) {
+    console.error('lock_seats_atomic RPC error:', rpcError);
     return { success: false, conflictingSeat: seatIds[0] };
   }
 
-  return { success: true };
+  if (rpcResult && typeof rpcResult === 'object') {
+    const res = rpcResult as { success: boolean; conflicting_seat?: string };
+    if (!res.success) {
+      return { success: false, conflictingSeat: res.conflicting_seat };
+    }
+    return { success: true };
+  }
+
+  return { success: false, conflictingSeat: seatIds[0] };
 }
 
 /**
- * Creates a pending booking with atomic seat reservation and authoritative pricing.
+ * Creates a pending booking with atomic seat reservation and authoritative pricing
+ * executed within a SINGLE ACID PostgreSQL transaction via create_pending_booking_atomic.
  */
 export async function createPendingBooking(params: CreateBookingParams) {
-  const { tripId, selectedSeats, passengerDetails, authenticatedUser, guestSessionId } = params;
+  const { tripId, selectedSeats, passengerDetails, authenticatedUser } = params;
   const supabase = getSupabaseAdminClient();
 
   if (!selectedSeats || selectedSeats.length === 0) {
@@ -231,107 +182,63 @@ export async function createPendingBooking(params: CreateBookingParams) {
 
   validateSeatsAgainstBusLayout(trip, selectedSeats);
 
-  // 2. Authoritative Fare Calculation
-  const individualFare = Number(trip.farePerSeat || trip.baseFare || 0);
-  if (individualFare <= 0) {
-    throw new HttpError(400, 'Invalid fare configuration for this trip schedule.');
-  }
-
-  const ticketAmount = selectedSeats.length * individualFare;
-  const commissionRate = 0.10;
-  const platformCommission = Math.round(ticketAmount * commissionRate * 100) / 100;
-  const gatewayFee = Math.round(ticketAmount * 0.03 * 100) / 100;
-  const ownerNetAmount = Math.round((ticketAmount - platformCommission - gatewayFee) * 100) / 100;
-
-  // 3. Generate secure identifiers
-  const timestamp = Date.now();
-  const orderId = `BK-${timestamp}-${Math.floor(Math.random() * 900 + 100)}`;
+  // 2. Generate secure cryptographically random identifiers
+  const orderId = `BK-${crypto.randomUUID()}`;
   const bookingReference = generateBookingReference();
-  const accessToken = crypto.randomBytes(24).toString('hex');
+  const rawAccessToken = crypto.randomBytes(32).toString('hex');
+  const accessTokenHash = crypto.createHash('sha256').update(rawAccessToken).digest('hex');
   const bookingType: BookingType = authenticatedUser ? 'account' : 'guest';
-  const effectiveUserId = authenticatedUser?.uid || guestSessionId || `gst_${accessToken.substring(0, 12)}`;
 
-  // 4. Atomically Lock Seats
-  const lockResult = await atomicLockSeats(tripId, selectedSeats, effectiveUserId, orderId);
-  if (!lockResult.success) {
-    throw new HttpError(
-      409,
-      `Seat ${lockResult.conflictingSeat || 'selection'} is no longer available. Please select another seat.`
-    );
-  }
-
-  // 5. Build Booking Object
-  const newBooking = {
-    id: orderId,
-    booking_reference: bookingReference,
-    access_token: accessToken,
-    booking_type: bookingType,
-    trip_id: tripId,
-    user_id: authenticatedUser?.uid || null,
-    owner_id: trip.ownerId,
-    passenger_name: passengerDetails.name.trim(),
-    passenger_phone: passengerDetails.phone.trim(),
-    passenger_email: passengerDetails.email?.trim() || null,
-    passenger_details: {
+  // 3. Authoritative Single ACID Transaction: Lock seats + Insert booking record atomically
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('create_pending_booking_atomic', {
+    p_order_id: orderId,
+    p_booking_reference: bookingReference,
+    p_access_token_hash: accessTokenHash,
+    p_booking_type: bookingType,
+    p_trip_id: tripId,
+    p_user_id: authenticatedUser?.uid || null,
+    p_passenger_name: passengerDetails.name.trim(),
+    p_passenger_phone: passengerDetails.phone.trim(),
+    p_passenger_email: passengerDetails.email?.trim() || null,
+    p_passenger_details: {
       name: passengerDetails.name.trim(),
       phone: passengerDetails.phone.trim(),
       email: passengerDetails.email?.trim() || '',
       uid: authenticatedUser?.uid || null
     },
-    seats: selectedSeats,
-    total_amount: ticketAmount,
-    fares: {
-      ticketAmount,
-      platformCommission,
-      gatewayFee,
-      ownerNetAmount
-    },
-    status: 'pending' as const,
-    boarded: false,
-    trip_snapshot: {
-      departureDate: trip.departureDate,
-      departureTime: trip.departureTime,
-      arrivalTime: trip.arrivalTime,
-      duration: trip.duration,
-      routeSnapshot: trip.routeSnapshot,
-      busSnapshot: trip.busSnapshot,
-      baseFare: individualFare,
-      farePerSeat: individualFare,
-      ownerId: trip.ownerId,
-      operatorName: trip.operatorName
-    } as unknown as Json,
-    created_at: new Date().toISOString()
-  };
+    p_seat_ids: selectedSeats,
+    p_duration_seconds: Math.floor(SEAT_LOCK_DURATION_MS / 1000)
+  });
 
-  const { error: insertBookingError } = await supabase
-    .from('bookings')
-    .insert([newBooking]);
-
-  if (insertBookingError) {
-    console.error("Failed to insert pending booking:", insertBookingError);
-    // Cleanup temporary seat locks to prevent deadlocks
-    await supabase
-      .from('seat_locks')
-      .delete()
-      .eq('trip_id', tripId)
-      .eq('booking_id', orderId);
-    throw new HttpError(500, 'Failed to create reservation record.');
+  if (rpcError) {
+    console.error('create_pending_booking_atomic RPC error:', rpcError);
+    throw new HttpError(500, 'Database transaction failed while creating booking reservation.');
   }
 
-  // Record audit log
-  await logAudit(
-    'PENDING_BOOKING_CREATED',
-    'booking',
-    orderId,
-    { tripId, seats: selectedSeats, amount: ticketAmount, bookingType },
-    authenticatedUser?.uid || null,
-    authenticatedUser?.role || 'Guest'
-  );
+  const res = rpcResult as {
+    success: boolean;
+    reason?: string;
+    conflicting_seat?: string;
+    message?: string;
+    total_amount?: number;
+  };
 
-  // 6. Generate PayHere Checkout Signature
+  if (!res || !res.success) {
+    if (res?.reason === 'already_booked' || res?.reason === 'currently_held') {
+      throw new HttpError(
+        409,
+        `Seat ${res.conflicting_seat || 'selection'} is no longer available. Please select another seat.`
+      );
+    }
+    throw new HttpError(400, res?.message || 'Failed to create reservation.');
+  }
+
+  const authoritativeTotal = Number(res.total_amount);
+
+  // 4. Generate PayHere Checkout Signature
   const merchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || '';
   const merchantSecret = process.env.PAYHERE_SECRET || '';
-  const formattedAmount = ticketAmount.toFixed(2);
+  const formattedAmount = authoritativeTotal.toFixed(2);
   const currency = DEFAULT_CURRENCY;
 
   let paymentHash = '';
@@ -345,9 +252,9 @@ export async function createPendingBooking(params: CreateBookingParams) {
     id: orderId,
     bookingId: orderId,
     bookingReference,
-    accessToken,
+    accessToken: rawAccessToken,
     bookingType,
-    totalAmount: ticketAmount,
+    totalAmount: authoritativeTotal,
     currency,
     merchantId,
     paymentHash,
@@ -410,14 +317,19 @@ export async function lookupBookingByReference(
 
   // Authorization Check
   let isAuthorized = false;
-  let isTokenOrAccountAuth = false;
 
-  if (accessToken && booking.accessToken && accessToken === booking.accessToken) {
-    isAuthorized = true;
-    isTokenOrAccountAuth = true;
+  if (accessToken) {
+    const providedHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+    const storedHash = (bookingData as Record<string, unknown>).access_token_hash as string | undefined;
+    const storedToken = bookingData.access_token;
+    if (
+      (storedHash && (storedHash === providedHash || storedHash === accessToken)) ||
+      (storedToken && (storedToken === accessToken || storedToken === providedHash))
+    ) {
+      isAuthorized = true;
+    }
   } else if (authenticatedUserId && booking.userId && authenticatedUserId === booking.userId) {
     isAuthorized = true;
-    isTokenOrAccountAuth = true;
   } else if (providedPhone) {
     const normProvided = normalizeSriLankanPhone(providedPhone);
     const normPassenger = normalizeSriLankanPhone(booking.passengerPhone || '');
@@ -433,10 +345,8 @@ export async function lookupBookingByReference(
     );
   }
 
-  // Prevent token leakage: If verified ONLY via phone, never expose accessToken in the response
-  if (!isTokenOrAccountAuth) {
-    booking.accessToken = '';
-  }
+  // Prevent token leakage: Never expose access token or hash in the lookup response
+  booking.accessToken = '';
 
   // Fetch full trip details
   const { data: tripData } = await supabase
@@ -500,7 +410,18 @@ export async function linkGuestBookingToAccount(
   }
 
   // Cryptographic token verification is mandatory to prevent phone guessing attacks
-  if (!accessToken || !booking.access_token || accessToken !== booking.access_token) {
+  const providedHash = accessToken ? crypto.createHash('sha256').update(accessToken).digest('hex') : null;
+  const storedHash = (booking as Record<string, unknown>).access_token_hash as string | undefined;
+  const storedToken = booking.access_token;
+
+  const isTokenMatch = Boolean(
+    accessToken && (
+      (storedHash && (storedHash === providedHash || storedHash === accessToken)) ||
+      (storedToken && (storedToken === accessToken || storedToken === providedHash))
+    )
+  );
+
+  if (!accessToken || !isTokenMatch) {
     throw new HttpError(403, 'Verification failed. A valid booking access token is required to claim this reservation.');
   }
 
@@ -544,7 +465,7 @@ export async function linkGuestBookingToAccount(
 }
 
 /**
- * Cancels a booking, computes eligible refunds, and frees up seats atomically.
+ * Cancels a booking, computes eligible refunds, and frees up seats atomically via cancel_booking_atomic.
  * Requires authenticated account ownership, admin privileges, or cryptographic access token.
  */
 export async function cancelBooking(
@@ -553,151 +474,53 @@ export async function cancelBooking(
   accessToken?: string
 ) {
   const supabase = getSupabaseAdminClient();
+  const tokenHash = accessToken ? crypto.createHash('sha256').update(accessToken).digest('hex') : undefined;
 
-  // 1. Try PostgreSQL atomic cancellation RPC first
-  try {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('cancel_booking_atomic', {
-      p_booking_id: bookingId,
-      p_caller_id: authenticatedUser?.uid || undefined,
-      p_access_token: accessToken || undefined,
-      p_is_admin: authenticatedUser?.isAdmin || false
-    });
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('cancel_booking_atomic', {
+    p_booking_id: bookingId,
+    p_caller_id: authenticatedUser?.uid || null,
+    p_access_token_hash: tokenHash || accessToken || null,
+    p_is_admin: authenticatedUser?.isAdmin || false
+  });
 
-    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
-      const res = rpcResult as {
-        success: boolean;
-        reason?: string;
-        message?: string;
-        refund_percentage?: number;
-        refund_amount?: number;
-        refund_id?: string;
-      };
+  if (rpcError) {
+    console.error('cancel_booking_atomic RPC error:', rpcError);
+    throw new HttpError(500, 'Database transaction failed while cancelling booking.');
+  }
 
-      if (!res.success) {
-        if (res.reason === 'not_found') throw new HttpError(404, 'Booking not found.');
-        if (res.reason === 'unauthorized') throw new HttpError(403, 'You are not authorized to cancel this booking.');
-        if (res.reason === 'already_cancelled') throw new HttpError(400, 'This booking has already been cancelled.');
-        throw new HttpError(400, res.message || 'Cancellation rejected.');
-      }
+  if (rpcResult && typeof rpcResult === 'object') {
+    const res = rpcResult as {
+      success: boolean;
+      reason?: string;
+      message?: string;
+      refund_percentage?: number;
+      refund_amount?: number;
+      refund_id?: string;
+    };
 
-      return {
-        success: true,
-        refundPercentage: res.refund_percentage ?? 0,
-        refundAmount: res.refund_amount ?? 0,
-        refundId: res.refund_id,
-        message: res.message || 'Booking cancelled successfully.'
-      };
+    if (!res.success) {
+      if (res.reason === 'not_found') throw new HttpError(404, 'Booking not found.');
+      if (res.reason === 'unauthorized') throw new HttpError(403, 'You are not authorized to cancel this booking.');
+      if (res.reason === 'already_cancelled') throw new HttpError(400, 'This booking has already been cancelled.');
+      if (res.reason === 'already_boarded') throw new HttpError(400, 'Cannot cancel a journey after passenger has boarded.');
+      throw new HttpError(400, res.message || 'Cancellation rejected.');
     }
-  } catch (rpcErr) {
-    if (rpcErr instanceof HttpError) throw rpcErr;
+
+    return {
+      success: true,
+      refundPercentage: res.refund_percentage ?? 0,
+      refundAmount: res.refund_amount ?? 0,
+      refundId: res.refund_id,
+      message: res.message || 'Booking cancelled successfully.'
+    };
   }
 
-  // 2. Direct transactional fallback
-  const { data: bookingData, error: bookingError } = await supabase
-    .from('bookings')
-    .select('*')
-    .eq('id', bookingId)
-    .maybeSingle();
-
-  if (bookingError || !bookingData) {
-    throw new HttpError(404, 'Booking not found.');
-  }
-
-  // Strict Authorization: Admin OR registered user who owns booking OR valid guest accessToken
-  let isAuthorized = false;
-  if (authenticatedUser?.isAdmin) {
-    isAuthorized = true;
-  } else if (authenticatedUser?.uid && bookingData.user_id === authenticatedUser.uid) {
-    isAuthorized = true;
-  } else if (accessToken && bookingData.access_token && bookingData.access_token === accessToken) {
-    isAuthorized = true;
-  }
-
-  if (!isAuthorized) {
-    throw new HttpError(403, 'Unauthorized: Valid account ownership or booking access token is required to cancel.');
-  }
-
-  if (bookingData.status === 'cancelled') {
-    throw new HttpError(400, 'This booking has already been cancelled.');
-  }
-
-  // Calculate refund policy based on departure date/time
-  const tripSnapshot = bookingData.trip_snapshot as Record<string, unknown>;
-  const departureDate = tripSnapshot?.departureDate as string;
-  const departureTime = tripSnapshot?.departureTime as string;
-
-  let refundPercentage = 0;
-  if (departureDate && departureTime) {
-    const departureDateTime = new Date(`${departureDate}T${departureTime}:00`);
-    const diffHours = (departureDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-
-    if (diffHours > 24) refundPercentage = 100;
-    else if (diffHours >= 12) refundPercentage = 50;
-    else refundPercentage = 0;
-  }
-
-  const fares = bookingData.fares as Record<string, unknown>;
-  const originalTicketAmount = Number(fares?.ticketAmount || bookingData.total_amount || 0);
-  const refundAmount = Math.round(((originalTicketAmount * refundPercentage) / 100) * 100) / 100;
-  const refundId = `RF-${Date.now()}`;
-
-  // Update booking status
-  await supabase
-    .from('bookings')
-    .update({
-      status: 'cancelled',
-      refund_id: refundId,
-      cancelled_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', bookingId);
-
-  // Insert refund record
-  await supabase
-    .from('refunds')
-    .insert([{
-      id: refundId,
-      booking_id: bookingId,
-      user_id: authenticatedUser?.uid || bookingData.user_id || 'guest',
-      original_amount: originalTicketAmount,
-      refund_amount: refundAmount,
-      refund_percentage: refundPercentage,
-      status: refundAmount > 0 ? 'pending_payout' : 'no_refund',
-      created_at: new Date().toISOString()
-    }]);
-
-  // Free up seats
-  if (bookingData.seats && Array.isArray(bookingData.seats)) {
-    await supabase
-      .from('seat_locks')
-      .delete()
-      .eq('trip_id', bookingData.trip_id)
-      .in('seat_id', bookingData.seats);
-  }
-
-  // Record audit log
-  await logAudit(
-    'BOOKING_CANCELLED',
-    'booking',
-    bookingId,
-    { refundId, refundAmount, refundPercentage },
-    authenticatedUser?.uid || 'guest',
-    authenticatedUser?.role || 'Guest'
-  );
-
-  return {
-    success: true,
-    refundPercentage,
-    refundAmount,
-    refundId,
-    message: refundAmount > 0
-      ? `Booking cancelled successfully. You are eligible for a ${refundPercentage}% refund (Rs. ${refundAmount.toFixed(2)}).`
-      : 'Booking cancelled successfully. No refund is available within 12 hours of departure.'
-  };
+  throw new HttpError(500, 'Unexpected cancellation response from database.');
 }
 
 /**
  * Handles PayHere Server-to-Server webhook with strict signature validation, currency, amount check & idempotency.
+ * Authoritatively executes inside PostgreSQL via process_payment_webhook_atomic.
  */
 export async function processPayHereNotification(params: PaymentNotificationParams) {
   const { merchantId, orderId, paymentId, payhereAmount, payhereCurrency, statusCode, md5sig } = params;
@@ -725,263 +548,81 @@ export async function processPayHereNotification(params: PaymentNotificationPara
   const supabase = getSupabaseAdminClient();
   const parsedAmount = parseFloat(payhereAmount);
 
-  // 1. Try PostgreSQL atomic stored procedure
-  try {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('process_payment_webhook_atomic', {
-      p_order_id: orderId,
-      p_payment_id: paymentId,
-      p_amount: parsedAmount,
-      p_currency: payhereCurrency,
-      p_status_code: statusCode,
-      p_raw_payload: params as unknown as Json
-    });
+  // Authoritative PostgreSQL atomic transaction
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('process_payment_webhook_atomic', {
+    p_order_id: orderId,
+    p_payment_id: paymentId,
+    p_amount: parsedAmount,
+    p_currency: payhereCurrency,
+    p_status_code: statusCode,
+    p_raw_payload: params as unknown as Json
+  });
 
-    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
-      const res = rpcResult as { success: boolean; status?: string; message?: string; reason?: string };
-      if (!res.success) {
-        if (res.reason === 'amount_mismatch') {
-          throw new HttpError(400, 'Payment amount mismatch. Potential tampering detected.');
-        }
-        if (res.reason === 'booking_not_found') {
-          throw new HttpError(404, `Booking #${orderId} was not found.`);
-        }
-        return { success: false, message: res.message || 'Payment processing failed', bookingId: orderId, status: res.status || 'failed' };
+  if (rpcError) {
+    console.error('process_payment_webhook_atomic RPC error:', rpcError);
+    throw new HttpError(500, 'Payment processing transaction failed.');
+  }
+
+  if (rpcResult && typeof rpcResult === 'object') {
+    const res = rpcResult as { success: boolean; status?: string; message?: string; reason?: string };
+    if (!res.success) {
+      if (res.reason === 'amount_mismatch') {
+        throw new HttpError(400, 'Payment amount mismatch. Potential tampering detected.');
       }
-      return { success: true, message: res.message || 'Payment confirmed', bookingId: orderId, status: res.status || 'confirmed' };
+      if (res.reason === 'booking_not_found') {
+        throw new HttpError(404, `Booking #${orderId} was not found.`);
+      }
+      return { success: false, message: res.message || 'Payment processing failed', bookingId: orderId, status: res.status || 'failed' };
     }
-  } catch (rpcErr) {
-    if (rpcErr instanceof HttpError) throw rpcErr;
+    return { success: true, message: res.message || 'Payment confirmed', bookingId: orderId, status: res.status || 'confirmed' };
   }
 
-  // 2. Direct transactional fallback
-  const { data: booking, error: bookingError } = await supabase
-    .from('bookings')
-    .select('*')
-    .eq('id', orderId)
-    .maybeSingle();
-
-  if (bookingError || !booking) {
-    throw new HttpError(404, `Booking #${orderId} was not found.`);
-  }
-
-  // Idempotency: If already confirmed, don't duplicate processing
-  if (booking.status === 'confirmed') {
-    return { success: true, message: 'Booking already confirmed previously', bookingId: orderId, status: 'confirmed' };
-  }
-
-  // Strict Authoritative Amount Validation
-  if (Math.abs(parsedAmount - Number(booking.total_amount)) >= 0.01) {
-    await logAudit(
-      'PAYMENT_AMOUNT_MISMATCH',
-      'booking',
-      orderId,
-      { expected: booking.total_amount, received: parsedAmount, paymentId },
-      'payhere_webhook',
-      'system'
-    );
-    throw new HttpError(400, 'Payment amount mismatch. Potential tampering detected.');
-  }
-
-  // Status code 2 = Success in PayHere
-  if (statusCode === '2') {
-    await supabase
-      .from('bookings')
-      .update({
-        status: 'confirmed',
-        payment_id: paymentId,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', orderId);
-
-    await supabase
-      .from('payments')
-      .upsert([{
-        id: paymentId || `PAY-${orderId}`,
-        booking_id: orderId,
-        order_id: orderId,
-        amount: parsedAmount,
-        currency: payhereCurrency,
-        status: 'completed',
-        provider: 'payhere',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }]);
-
-    if (booking.seats && Array.isArray(booking.seats)) {
-      const bookedRecords = booking.seats.map((seatId: string) => ({
-        trip_id: booking.trip_id,
-        seat_id: seatId,
-        user_id: booking.user_id || 'guest',
-        booking_id: orderId,
-        status: 'booked' as const,
-        created_at: new Date().toISOString(),
-        expires_at: null
-      }));
-
-      await supabase
-        .from('seat_locks')
-        .upsert(bookedRecords, { onConflict: 'trip_id,seat_id' });
-    }
-
-    await logAudit(
-      'PAYMENT_CONFIRMED',
-      'booking',
-      orderId,
-      { amount: parsedAmount, paymentId },
-      'payhere_webhook',
-      'system'
-    );
-
-    return { success: true, message: 'Payment successfully processed and booking confirmed', bookingId: orderId, status: 'confirmed' };
-  } else {
-    await supabase
-      .from('bookings')
-      .update({
-        status: 'payment_failed',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', orderId);
-
-    if (booking.seats && Array.isArray(booking.seats)) {
-      await supabase
-        .from('seat_locks')
-        .delete()
-        .eq('trip_id', booking.trip_id)
-        .eq('booking_id', orderId)
-        .eq('status', 'locked');
-    }
-
-    await logAudit(
-      'PAYMENT_FAILED',
-      'booking',
-      orderId,
-      { statusCode, amount: parsedAmount },
-      'payhere_webhook',
-      'system'
-    );
-
-    return { success: false, message: `Payment failed with status code ${statusCode}`, bookingId: orderId, status: 'payment_failed' };
-  }
+  throw new HttpError(500, 'Unexpected response from payment processor.');
 }
 
 export const confirmBookingPayment = processPayHereNotification;
 
 /**
- * Atomically checks and boards a passenger with anti-duplicate verification & trip staff authorization.
+ * Atomically checks and boards a passenger with anti-duplicate verification & trip staff authorization
+ * executed inside PostgreSQL via board_passenger_atomic.
  */
 export async function atomicBoardTicket(bookingId: string, staffUser: AuthenticatedUser) {
   const supabase = getSupabaseAdminClient();
 
-  // Try PostgreSQL atomic RPC function
-  try {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('board_passenger_atomic', {
-      p_booking_id: bookingId,
-      p_conductor_id: staffUser.uid
-    });
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('board_passenger_atomic', {
+    p_booking_id: bookingId,
+    p_conductor_id: staffUser.uid
+  });
 
-    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
-      const res = rpcResult as {
-        success: boolean;
-        reason?: string;
-        message?: string;
-        boarded_at?: string;
-        boarded_by?: string;
-      };
-
-      if (!res.success) {
-        return {
-          success: false,
-          reason: res.reason?.toUpperCase() || 'REJECTED',
-          message: res.message || 'Boarding rejected',
-          boardedAt: res.boarded_at ? new Date(res.boarded_at).getTime() : undefined
-        };
-      }
-
-      return {
-        success: true,
-        message: res.message || 'Passenger successfully checked in & boarded',
-        boardedAt: res.boarded_at ? new Date(res.boarded_at).getTime() : Date.now()
-      };
-    }
-  } catch {
-    // Fall back to direct query with assignment check
+  if (rpcError) {
+    console.error('board_passenger_atomic RPC error:', rpcError);
+    return { success: false, reason: 'RPC_ERROR', message: 'Boarding transaction failed in database.' };
   }
 
-  // Fallback: Direct conditional query
-  const { data: booking, error: findError } = await supabase
-    .from('bookings')
-    .select('*')
-    .eq('id', bookingId)
-    .maybeSingle();
+  if (rpcResult && typeof rpcResult === 'object') {
+    const res = rpcResult as {
+      success: boolean;
+      reason?: string;
+      message?: string;
+      boarded_at?: string;
+      boarded_by?: string;
+    };
 
-  if (findError || !booking) {
-    return { success: false, reason: 'NOT_FOUND', message: 'Booking reference not found.' };
-  }
-
-  // Verify staff authorization for this trip
-  if (!staffUser.isAdmin && booking.owner_id !== staffUser.uid) {
-    const { data: assignment } = await supabase
-      .from('staff_trip_assignments')
-      .select('id')
-      .eq('trip_id', booking.trip_id)
-      .eq('staff_id', staffUser.uid)
-      .maybeSingle();
-
-    if (!assignment) {
+    if (!res.success) {
       return {
         success: false,
-        reason: 'UNAUTHORIZED_STAFF',
-        message: 'Staff member is not assigned to this trip schedule.'
+        reason: res.reason?.toUpperCase() || 'REJECTED',
+        message: res.message || 'Boarding rejected',
+        boardedAt: res.boarded_at ? new Date(res.boarded_at).getTime() : undefined
       };
     }
-  }
 
-  if (booking.status === 'cancelled') {
-    return { success: false, reason: 'CANCELLED', message: 'This ticket was cancelled and refunded.' };
-  }
-
-  if (booking.status !== 'confirmed' && booking.status !== 'boarded') {
-    return { success: false, reason: 'UNCONFIRMED', message: 'This booking is unpaid or pending.' };
-  }
-
-  if (booking.boarded) {
     return {
-      success: false,
-      reason: 'ALREADY_BOARDED',
-      message: 'This passenger has already boarded the bus.',
-      boardedAt: booking.boarded_at ? new Date(booking.boarded_at).getTime() : undefined
+      success: true,
+      message: res.message || 'Passenger successfully checked in & boarded',
+      boardedAt: res.boarded_at ? new Date(res.boarded_at).getTime() : Date.now()
     };
   }
 
-  const nowIso = new Date().toISOString();
-  const { error: updateError } = await supabase
-    .from('bookings')
-    .update({
-      boarded: true,
-      boarded_at: nowIso,
-      boarded_by: staffUser.uid,
-      status: 'boarded',
-      updated_at: nowIso
-    })
-    .eq('id', bookingId)
-    .eq('boarded', false);
-
-  if (updateError) {
-    return { success: false, reason: 'CONFLICT', message: 'Boarding conflict. Please rescan.' };
-  }
-
-  await logAudit(
-    'PASSENGER_BOARDED',
-    'booking',
-    bookingId,
-    { tripId: booking.trip_id, seats: booking.seats },
-    staffUser.uid,
-    'Conductor'
-  );
-
-  return {
-    success: true,
-    message: 'Passenger checked in and marked as boarded.',
-    boardedAt: Date.now()
-  };
+  return { success: false, reason: 'UNKNOWN_ERROR', message: 'Unexpected database response.' };
 }

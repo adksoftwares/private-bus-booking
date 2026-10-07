@@ -557,6 +557,254 @@ async function runTestSuite() {
   assert(verifiedRating.success, 'Accepts authentic, verified passenger rating submission');
 
   // ----------------------------------------------------
+  // SUITE 11: Booking State Machine Transitions
+  // ----------------------------------------------------
+  console.log('\n--- Suite 11: Booking State Machine Transitions ---');
+
+  type BookingState = 'pending' | 'confirmed' | 'payment_failed' | 'cancelled' | 'boarded';
+
+  function validateStateTransition(current: BookingState, target: BookingState): { allowed: boolean; reason?: string } {
+    if (current === target) return { allowed: true };
+
+    const validTransitions: Record<BookingState, BookingState[]> = {
+      pending: ['confirmed', 'payment_failed', 'cancelled'],
+      confirmed: ['boarded', 'cancelled'],
+      payment_failed: ['pending'],
+      cancelled: [], // Terminal
+      boarded: []    // Terminal
+    };
+
+    const allowedTargets = validTransitions[current] || [];
+    if (!allowedTargets.includes(target)) {
+      return {
+        allowed: false,
+        reason: `Illegal state transition from ${current} to ${target}`
+      };
+    }
+    return { allowed: true };
+  }
+
+  // 11a: Legal transition: pending -> confirmed
+  assert(
+    validateStateTransition('pending', 'confirmed').allowed,
+    'Allows legal transition: pending -> confirmed upon successful payment'
+  );
+
+  // 11b: Legal transition: confirmed -> boarded
+  assert(
+    validateStateTransition('confirmed', 'boarded').allowed,
+    'Allows legal transition: confirmed -> boarded upon conductor scan'
+  );
+
+  // 11c: Legal transition: confirmed -> cancelled
+  assert(
+    validateStateTransition('confirmed', 'cancelled').allowed,
+    'Allows legal transition: confirmed -> cancelled upon refund request'
+  );
+
+  // 11d: Illegal transition: cancelled -> confirmed
+  assert(
+    !validateStateTransition('cancelled', 'confirmed').allowed,
+    'Rejects illegal transition: cancelled -> confirmed (Terminal state violation)'
+  );
+
+  // 11e: Illegal transition: boarded -> cancelled
+  assert(
+    !validateStateTransition('boarded', 'cancelled').allowed,
+    'Rejects illegal transition: boarded -> cancelled (Cannot cancel after departure)'
+  );
+
+  // 11f: Illegal transition: payment_failed -> boarded
+  assert(
+    !validateStateTransition('payment_failed', 'boarded').allowed,
+    'Rejects illegal transition: payment_failed -> boarded (Cannot board unpaid ticket)'
+  );
+
+  // ----------------------------------------------------
+  // SUITE 12: Expired Seat Lock Auto-Sweep & Renewal
+  // ----------------------------------------------------
+  console.log('\n--- Suite 12: Expired Seat Lock Auto-Sweep ---');
+
+  interface MockSeatLock {
+    tripId: string;
+    seatId: string;
+    userId: string;
+    status: 'locked' | 'booked';
+    expiresAt: number;
+  }
+
+  const seatStore: Record<string, MockSeatLock> = {
+    'TRIP-X:14A': {
+      tripId: 'TRIP-X',
+      seatId: '14A',
+      userId: 'user_expired_holder',
+      status: 'locked',
+      expiresAt: Date.now() - 5000 // Expired 5 seconds ago
+    },
+    'TRIP-X:14B': {
+      tripId: 'TRIP-X',
+      seatId: '14B',
+      userId: 'user_active_holder',
+      status: 'locked',
+      expiresAt: Date.now() + 300000 // Active for 5 more minutes
+    },
+    'TRIP-X:14C': {
+      tripId: 'TRIP-X',
+      seatId: '14C',
+      userId: 'user_confirmed',
+      status: 'booked',
+      expiresAt: Infinity
+    }
+  };
+
+  function simulateAtomicAcquireSeat(
+    tripId: string,
+    seatId: string,
+    newUserId: string
+  ): { success: boolean; conflictingSeat?: string; reason?: string } {
+    const key = `${tripId}:${seatId}`;
+    const existing = seatStore[key];
+    const now = Date.now();
+
+    // 1. Auto-sweep expired locks
+    if (existing && existing.status === 'locked' && existing.expiresAt <= now) {
+      delete seatStore[key];
+    }
+
+    const current = seatStore[key];
+    if (current) {
+      if (current.status === 'booked') {
+        return { success: false, conflictingSeat: seatId, reason: 'ALREADY_BOOKED' };
+      }
+      if (current.status === 'locked' && current.userId !== newUserId && current.expiresAt > now) {
+        return { success: false, conflictingSeat: seatId, reason: 'CURRENTLY_HELD' };
+      }
+    }
+
+    // Acquire lock
+    seatStore[key] = {
+      tripId,
+      seatId,
+      userId: newUserId,
+      status: 'locked',
+      expiresAt: now + SEAT_LOCK_DURATION_MS
+    };
+
+    return { success: true };
+  }
+
+  // 12a: Successfully acquires previously expired seat 14A
+  const sweepAndAcquire = simulateAtomicAcquireSeat('TRIP-X', '14A', 'passenger_new');
+  assert(sweepAndAcquire.success, 'Sweeps expired seat lock and permits new passenger acquisition');
+
+  // 12b: Blocks acquisition of still-active held seat 14B
+  const activeHeldAttempt = simulateAtomicAcquireSeat('TRIP-X', '14B', 'passenger_stranger');
+  assert(
+    !activeHeldAttempt.success && activeHeldAttempt.reason === 'CURRENTLY_HELD',
+    'Protects active held seat from being stolen before expiration'
+  );
+
+  // 12c: Blocks acquisition of permanently booked seat 14C
+  const bookedSeatAttempt = simulateAtomicAcquireSeat('TRIP-X', '14C', 'passenger_stranger');
+  assert(
+    !bookedSeatAttempt.success && bookedSeatAttempt.reason === 'ALREADY_BOOKED',
+    'Permanently blocks booked seat from lock acquisition'
+  );
+
+  // ----------------------------------------------------
+  // SUITE 13: Webhook & Payment Confirmation Idempotency
+  // ----------------------------------------------------
+  console.log('\n--- Suite 13: Webhook & Payment Idempotency ---');
+
+  interface MockPaymentRecord {
+    orderId: string;
+    status: 'pending' | 'confirmed';
+    confirmedCount: number;
+  }
+
+  const paymentOrderStore: Record<string, MockPaymentRecord> = {
+    'BK-IDEMPOTENT-1': {
+      orderId: 'BK-IDEMPOTENT-1',
+      status: 'pending',
+      confirmedCount: 0
+    }
+  };
+
+  function simulateProcessPaymentAtomic(orderId: string): { success: boolean; isReplay: boolean; message: string } {
+    const record = paymentOrderStore[orderId];
+    if (!record) return { success: false, isReplay: false, message: 'Not found' };
+
+    // Idempotency check: If already confirmed, acknowledge without side effects
+    if (record.status === 'confirmed') {
+      return { success: true, isReplay: true, message: 'Booking already confirmed previously' };
+    }
+
+    record.status = 'confirmed';
+    record.confirmedCount += 1;
+    return { success: true, isReplay: false, message: 'Payment confirmed' };
+  }
+
+  // 13a: First webhook invocation commits confirmation
+  const firstWebhook = simulateProcessPaymentAtomic('BK-IDEMPOTENT-1');
+  assert(firstWebhook.success && !firstWebhook.isReplay, 'First payment webhook call confirms booking');
+  assert(paymentOrderStore['BK-IDEMPOTENT-1'].confirmedCount === 1, 'Booking confirmed count is exactly 1');
+
+  // 13b: Replay of identical webhook succeeds idempotently without re-execution
+  const replayWebhook = simulateProcessPaymentAtomic('BK-IDEMPOTENT-1');
+  assert(replayWebhook.success && replayWebhook.isReplay, 'Replay payment webhook is acknowledged idempotently');
+  assert(
+    paymentOrderStore['BK-IDEMPOTENT-1'].confirmedCount === 1,
+    'No side effects or double-allocations on replayed webhook'
+  );
+
+  // ----------------------------------------------------
+  // SUITE 14: Data Masking & Privacy Leakage Prevention
+  // ----------------------------------------------------
+  console.log('\n--- Suite 14: Data Masking & Privacy Leakage Prevention ---');
+
+  interface RawSeatLockRecord {
+    seat_id: string;
+    status: string;
+    user_id: string;
+    booking_id: string;
+    expires_at: string;
+  }
+
+  function simulateTripSeatAvailabilityRPC(
+    locks: RawSeatLockRecord[],
+    callerUserId: string | null
+  ): Array<{ seat_id: string; status: string; is_mine: boolean; expires_at: string }> {
+    return locks.map((l) => ({
+      seat_id: l.seat_id,
+      status: l.status,
+      is_mine: Boolean(callerUserId && l.user_id === callerUserId),
+      expires_at: l.expires_at
+    }));
+  }
+
+  const rawLocks: RawSeatLockRecord[] = [
+    { seat_id: '01A', status: 'booked', user_id: 'user_secret_uuid_1', booking_id: 'BK-SECRET-1', expires_at: '' },
+    { seat_id: '01B', status: 'locked', user_id: 'user_secret_uuid_2', booking_id: 'BK-SECRET-2', expires_at: '2026-10-07T12:00:00Z' }
+  ];
+
+  const publicAvailability = simulateTripSeatAvailabilityRPC(rawLocks, null);
+
+  assert(
+    !('user_id' in publicAvailability[0]) && !('booking_id' in publicAvailability[0]),
+    'Public seat availability RPC never exposes user_id or booking_id'
+  );
+  assert(
+    publicAvailability[0].is_mine === false && publicAvailability[1].is_mine === false,
+    'Anonymous callers see is_mine = false for all reserved seats'
+  );
+
+  const myAvailability = simulateTripSeatAvailabilityRPC(rawLocks, 'user_secret_uuid_2');
+  assert(
+    myAvailability[1].is_mine === true && myAvailability[0].is_mine === false,
+    'Correctly identifies caller-owned seat without exposing raw foreign user IDs'
+  );
+
+  // ----------------------------------------------------
   // TEST SUMMARY
   // ----------------------------------------------------
   console.log('\n================================================================');

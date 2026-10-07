@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { atomicLockSeats } from '@/lib/services/booking-service';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
     const seatsToLock: string[] = seatIds || [seatId];
     const user = await getAuthenticatedUser(req);
     const effectiveUserId = user?.uid || guestSessionId || 'anonymous_guest';
-    const tempOrderId = `TMP-${Date.now()}`;
+    const tempOrderId = `TMP-${crypto.randomUUID()}`;
 
     const lockResult = await atomicLockSeats(tripId, seatsToLock, effectiveUserId, tempOrderId);
 

@@ -244,6 +244,7 @@ export interface Database {
           id: string;
           booking_reference: string;
           access_token: string;
+          access_token_hash: string | null;
           booking_type: BookingType;
           trip_id: string;
           user_id: string | null;
@@ -269,7 +270,8 @@ export interface Database {
         Insert: {
           id: string;
           booking_reference: string;
-          access_token: string;
+          access_token?: string;
+          access_token_hash?: string | null;
           booking_type?: BookingType;
           trip_id: string;
           user_id?: string | null;
@@ -296,6 +298,7 @@ export interface Database {
           id?: string;
           booking_reference?: string;
           access_token?: string;
+          access_token_hash?: string | null;
           booking_type?: BookingType;
           trip_id?: string;
           user_id?: string | null;
@@ -539,6 +542,23 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      create_pending_booking_atomic: {
+        Args: {
+          p_order_id: string;
+          p_booking_reference: string;
+          p_access_token_hash: string;
+          p_booking_type: string;
+          p_trip_id: string;
+          p_user_id?: string | null;
+          p_passenger_name?: string | null;
+          p_passenger_phone?: string | null;
+          p_passenger_email?: string | null;
+          p_passenger_details?: Json;
+          p_seat_ids: string[];
+          p_duration_seconds?: number;
+        };
+        Returns: Json;
+      };
       lock_seats_atomic: {
         Args: {
           p_trip_id: string;
@@ -589,6 +609,7 @@ export interface Database {
           p_booking_id: string;
           p_caller_id?: string | null;
           p_access_token?: string | null;
+          p_access_token_hash?: string | null;
           p_is_admin?: boolean;
         };
         Returns: Json;

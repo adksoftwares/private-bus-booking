@@ -47,52 +47,52 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 -- ==============================================================================
 
 DO $$ BEGIN
-    ALTER TABLE public.trips
-        ADD CONSTRAINT chk_trips_positive_fare CHECK (base_fare > 0 AND fare_per_seat > 0);
+    ALTER TABLE public.trips DROP CONSTRAINT IF EXISTS chk_trips_positive_fare;
+    ALTER TABLE public.trips ADD CONSTRAINT chk_trips_positive_fare CHECK (base_fare > 0 AND fare_per_seat > 0);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 DO $$ BEGIN
-    ALTER TABLE public.bookings
-        ADD CONSTRAINT chk_bookings_positive_amount CHECK (total_amount > 0);
+    ALTER TABLE public.bookings DROP CONSTRAINT IF EXISTS chk_bookings_positive_amount;
+    ALTER TABLE public.bookings ADD CONSTRAINT chk_bookings_positive_amount CHECK (total_amount > 0);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 DO $$ BEGIN
-    ALTER TABLE public.buses
-        ADD CONSTRAINT chk_buses_seat_bounds CHECK (total_seats >= 10 AND total_seats <= 75);
+    ALTER TABLE public.buses DROP CONSTRAINT IF EXISTS chk_buses_seat_bounds;
+    ALTER TABLE public.buses ADD CONSTRAINT chk_buses_seat_bounds CHECK (total_seats >= 10 AND total_seats <= 75);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 DO $$ BEGIN
-    ALTER TABLE public.bus_reviews
-        ADD CONSTRAINT chk_reviews_rating_range CHECK (rating >= 1 AND rating <= 5);
+    ALTER TABLE public.bus_reviews DROP CONSTRAINT IF EXISTS chk_reviews_rating_range;
+    ALTER TABLE public.bus_reviews ADD CONSTRAINT chk_reviews_rating_range CHECK (rating >= 1 AND rating <= 5);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 DO $$ BEGIN
-    ALTER TABLE public.payments
-        ADD CONSTRAINT uq_payments_order UNIQUE (order_id);
+    ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS uq_payments_order;
+    ALTER TABLE public.payments ADD CONSTRAINT uq_payments_order UNIQUE (order_id);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 DO $$ BEGIN
-    ALTER TABLE public.payments
-        ADD CONSTRAINT chk_payments_positive_amount CHECK (amount > 0);
+    ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS chk_payments_positive_amount;
+    ALTER TABLE public.payments ADD CONSTRAINT chk_payments_positive_amount CHECK (amount > 0);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 DO $$ BEGIN
-    ALTER TABLE public.refunds
-        ADD CONSTRAINT chk_refunds_bounds CHECK (refund_amount >= 0 AND refund_percentage >= 0 AND refund_percentage <= 100);
+    ALTER TABLE public.refunds DROP CONSTRAINT IF EXISTS chk_refunds_bounds;
+    ALTER TABLE public.refunds ADD CONSTRAINT chk_refunds_bounds CHECK (refund_amount >= 0 AND refund_percentage >= 0 AND refund_percentage <= 100);
 EXCEPTION
-    WHEN duplicate_object THEN null;
+    WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 
 -- ==============================================================================

@@ -54,9 +54,30 @@ export default function FleetPage() {
     };
   }, [user, authFetch]);
 
-  const handleBecomeOwner = async () => {
+  const [showRegModal, setShowRegModal] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regNic, setRegNic] = useState('');
+  const [regAddress, setRegAddress] = useState('');
+  const [formError, setFormError] = useState('');
+
+  const handleBecomeOwner = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!user) return;
+
+    const finalName = regName.trim() || user.displayName || 'Bus Operator';
+    const finalPhone = regPhone.trim() || user.phone || '';
+    const finalNic = regNic.trim().toUpperCase() || '199512345678';
+    const finalAddress = regAddress.trim() || 'Central Bus Depot, Sri Lanka';
+
+    if (!finalPhone) {
+      setFormError('Please enter a valid Sri Lankan mobile phone number (e.g. 0771234567).');
+      setShowRegModal(true);
+      return;
+    }
+
     setBecomingOwner(true);
+    setFormError('');
     setNotice(null);
 
     try {
@@ -64,8 +85,10 @@ export default function FleetPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: user.displayName || 'Bus Operator',
-          phone: user.phone || ''
+          name: finalName,
+          phone: finalPhone,
+          nic: finalNic,
+          address: finalAddress
         })
       });
 
@@ -75,10 +98,12 @@ export default function FleetPage() {
       }
 
       await refreshRole();
+      setShowRegModal(false);
       setNotice({ type: 'success', message: 'Congratulations! Your account is now registered as a Bus Operator.' });
     } catch (err: unknown) {
       console.error("Failed to upgrade to owner:", err);
       const error = err as Error;
+      setFormError(error.message || 'Failed to register as bus operator.');
       setNotice({ type: 'error', message: error.message || 'Failed to register as bus operator.' });
     } finally {
       setBecomingOwner(false);
@@ -166,14 +191,117 @@ export default function FleetPage() {
             </div>
 
             <button
-              onClick={handleBecomeOwner}
-              disabled={becomingOwner}
-              className="bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold px-8 py-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              onClick={() => {
+                setRegName(user.displayName || '');
+                setRegPhone(user.phone || '');
+                setShowRegModal(true);
+              }}
+              className="bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold px-8 py-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
             >
-              {becomingOwner ? 'Registering Operator Account...' : 'Register as Bus Owner & Start Adding Buses'}
+              Register as Bus Owner & Start Adding Buses
             </button>
           </div>
         </div>
+
+        {/* Operator Registration Modal */}
+        {showRegModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 text-slate-900 shadow-2xl relative">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
+                <div>
+                  <h3 className="text-xl font-black text-slate-800">Complete Operator Registration</h3>
+                  <p className="text-xs text-slate-500">Provide official details to verify your bus fleet operator account</p>
+                </div>
+                <button 
+                  onClick={() => setShowRegModal(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center text-sm font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {formError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-xl">
+                  {formError}
+                </div>
+              )}
+
+              <form onSubmit={handleBecomeOwner} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Company / Operator Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={regName}
+                    onChange={e => setRegName(e.target.value)}
+                    placeholder="e.g. ABC Travels / Lanka Intercity Express"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Official Mobile Number (Sri Lanka) *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={regPhone}
+                    onChange={e => setRegPhone(e.target.value)}
+                    placeholder="e.g. 0771234567 or +94771234567"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium font-mono focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  />
+                  <span className="text-[11px] text-slate-400 mt-1 block">Used for booking SMS alerts & conductor dispatch</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    National ID (NIC) or Business Reg Number
+                  </label>
+                  <input
+                    type="text"
+                    value={regNic}
+                    onChange={e => setRegNic(e.target.value)}
+                    placeholder="e.g. 199512345678 or 912345678V"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium font-mono uppercase focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Base Depot / Office Address
+                  </label>
+                  <input
+                    type="text"
+                    value={regAddress}
+                    onChange={e => setRegAddress(e.target.value)}
+                    placeholder="e.g. Central Bus Stand, Colombo 11"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  />
+                </div>
+
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowRegModal(false)}
+                    className="flex-1 py-3 border border-slate-200 rounded-xl text-slate-600 font-bold hover:bg-slate-50 transition cursor-pointer text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={becomingOwner}
+                    className="flex-1 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold transition shadow-md disabled:opacity-50 cursor-pointer text-sm"
+                  >
+                    {becomingOwner ? 'Registering...' : 'Confirm & Register'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

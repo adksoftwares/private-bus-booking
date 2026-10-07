@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { DEFAULT_CURRENCY } from '@/lib/constants';
 
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    await enforceRateLimit(req, 'payhere_hash', 30, 60);
+    enforceRateLimit(req, 'payhere_hash', 30, 60);
 
     const body = await req.json();
-    const { orderId } = body;
+    const { orderId, accessToken } = body;
 
     if (!orderId || typeof orderId !== 'string') {
       return NextResponse.json({ error: 'Valid orderId is required' }, { status: 400 });
@@ -40,14 +41,40 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Booking not found for orderId' }, { status: 404 });
     }
 
-    if (booking.status !== 'pending' && booking.status !== 'confirmed') {
+    // 4. Strict State Machine: Payment hash can ONLY be generated for pending reservations
+    if (booking.status !== 'pending') {
       return NextResponse.json(
-        { error: `Cannot initiate payment for booking with status '${booking.status}'` },
+        { error: `Cannot initiate payment for booking with status '${booking.status}'. Only pending reservations can be paid.` },
         { status: 400 }
       );
     }
 
-    // 4. Authoritative amount derived directly from server record
+    // 5. Booking Authorization Check
+    const authUser = await getAuthenticatedUser(req);
+    if (booking.user_id) {
+      if (!authUser || (authUser.uid !== booking.user_id && authUser.role !== 'Admin')) {
+        return NextResponse.json(
+          { error: 'Access denied: You do not have permission to pay for this reservation.' },
+          { status: 403 }
+        );
+      }
+    } else {
+      // Guest booking: If an accessToken was passed, verify authenticity
+      if (accessToken) {
+        const providedHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+        const storedHash = (booking as Record<string, unknown>).access_token_hash as string | undefined;
+        const storedToken = booking.access_token;
+        const matches =
+          (storedHash && (storedHash === providedHash || storedHash === accessToken)) ||
+          (storedToken && (storedToken === accessToken || storedToken === providedHash));
+
+        if (!matches) {
+          return NextResponse.json({ error: 'Invalid access token for this guest reservation.' }, { status: 403 });
+        }
+      }
+    }
+
+    // 6. Authoritative amount derived directly from server record
     const amount = Number(booking.total_amount);
     if (!amount || isNaN(amount) || amount <= 0) {
       return NextResponse.json({ error: 'Invalid booking ticket amount' }, { status: 400 });
@@ -56,7 +83,7 @@ export async function POST(req: Request) {
     const currency = DEFAULT_CURRENCY; // LKR
     const formattedAmount = amount.toFixed(2);
 
-    // 5. Official PayHere MD5 Hash generation:
+    // 7. Official PayHere MD5 Hash generation:
     // md5sig = strtoupper(md5(merchant_id + order_id + amount_formatted + currency + strtoupper(md5(payhere_secret))))
     const hashedSecret = crypto.createHash('md5').update(secret).digest('hex').toUpperCase();
     const hashString = `${merchantId}${orderId}${formattedAmount}${currency}${hashedSecret}`;
@@ -66,16 +93,18 @@ export async function POST(req: Request) {
       hash: finalHash,
       merchantId,
       amount: formattedAmount,
+      formattedAmount,
       currency,
       orderId
     });
 
   } catch (err: unknown) {
-    const error = err as Error;
-    console.error("PayHere hash generation error:", error);
+    const errorObj = err as { statusCode?: number; message?: string };
+    const statusCode = errorObj.statusCode || 500;
+    console.error("PayHere hash generation error:", errorObj);
     return NextResponse.json(
-      { error: error.message || 'Internal error calculating payment hash.' },
-      { status: 500 }
+      { error: errorObj.message || 'Internal error calculating payment hash.' },
+      { status: statusCode }
     );
   }
 }

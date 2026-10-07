@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireOwner } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 import { createTripSchema, formatZodError } from '@/lib/validation/schemas';
 import { Trip, BusSnapshot, RouteSnapshot, BookedSeatInfo } from '@/types/trip';
 import { Json } from '@/types/database';
@@ -9,7 +10,7 @@ import { Json } from '@/types/database';
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const ownerId = searchParams.get('ownerId');
+    const requestedOwnerId = searchParams.get('ownerId');
     const date = searchParams.get('date');
 
     const supabase = getSupabaseAdminClient();
@@ -19,9 +20,19 @@ export async function GET(req: Request) {
       .order('departure_date', { ascending: false })
       .order('departure_time', { ascending: true });
 
-    if (ownerId) {
-      query = query.eq('owner_id', ownerId);
+    // Multi-tenant Trip Isolation:
+    // If ownerId is specifically requested (e.g. Owner Dashboard), enforce authentication and ownership
+    if (requestedOwnerId) {
+      const authUser = await requireOwner(req);
+      if (authUser.role !== 'Admin' && authUser.uid !== requestedOwnerId) {
+        return NextResponse.json({ error: 'Access denied: You can only query your own trips.' }, { status: 403 });
+      }
+      query = query.eq('owner_id', requestedOwnerId);
+    } else {
+      // Public search: strictly return only active scheduled trips
+      query = query.eq('status', 'scheduled');
     }
+
     if (date) {
       query = query.eq('departure_date', date);
     }
@@ -33,14 +44,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Also load bookedSeats map for each trip from seat_locks
+    // Load bookedSeats map for each trip from seat_locks with privacy masking
     const tripIds = (tripsData || []).map(t => t.id);
     const locksMap: Record<string, Record<string, BookedSeatInfo>> = {};
 
     if (tripIds.length > 0) {
       const { data: seatLocks } = await supabase
         .from('seat_locks')
-        .select('trip_id, seat_id, status, user_id, expires_at')
+        .select('trip_id, seat_id, status, expires_at')
         .in('trip_id', tripIds);
 
       const now = Date.now();
@@ -77,15 +88,16 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ trips });
   } catch (err: unknown) {
-    console.error("GET /api/trips error:", err);
-    const message = err instanceof Error ? err.message : 'Failed to fetch trips';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const errorObj = err as { statusCode?: number; message?: string };
+    const statusCode = errorObj.statusCode || 500;
+    return NextResponse.json({ error: errorObj.message || 'Failed to fetch trips' }, { status: statusCode });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    // 1. Authoritative Server Authentication (Only verified Owners or Admins)
+    // 1. Rate limiting & Authoritative Server Authentication
+    enforceRateLimit(req, 'create_trip', 15, 60);
     const authenticatedUser = await requireOwner(req);
     const supabase = getSupabaseAdminClient();
 
@@ -111,7 +123,7 @@ export async function POST(req: Request) {
       farePerSeat
     } = parseResult.data;
 
-    // 3. Verify Bus exists and strictly enforce Owner Fleet Isolation
+    // 3. Verify Bus exists, is active, and enforce Owner Fleet Isolation
     const { data: busData, error: busError } = await supabase
       .from('buses')
       .select('*')
@@ -124,6 +136,10 @@ export async function POST(req: Request) {
 
     if (authenticatedUser.role !== 'Admin' && busData.owner_id !== authenticatedUser.uid) {
       return NextResponse.json({ error: 'Access denied. You do not own this bus.' }, { status: 403 });
+    }
+
+    if (busData.status !== 'active') {
+      return NextResponse.json({ error: `Cannot schedule trips for bus with '${busData.status}' status.` }, { status: 400 });
     }
 
     // 4. Build bus snapshot
@@ -196,6 +212,27 @@ export async function POST(req: Request) {
     if (insertTripError) {
       console.error("Failed to insert trip:", insertTripError);
       return NextResponse.json({ error: 'Failed to create trip schedule in database.' }, { status: 500 });
+    }
+
+    // 7. Audit Log
+    try {
+      await supabase.from('audit_logs').insert([{
+        action: 'trip_created',
+        resource_type: 'trip',
+        resource_id: tripId,
+        actor_id: authenticatedUser.uid,
+        metadata: {
+          busId,
+          startCity: cleanStart,
+          endCity: cleanEnd,
+          departureDate,
+          departureTime,
+          farePerSeat: finalFare
+        } as unknown as Json,
+        created_at: new Date().toISOString()
+      }]);
+    } catch (auditErr) {
+      console.warn("Non-critical: Audit log insert error:", auditErr);
     }
 
     return NextResponse.json({

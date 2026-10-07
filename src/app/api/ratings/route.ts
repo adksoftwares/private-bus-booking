@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 import { submitBusRatingSchema, formatZodError } from '@/lib/validation/schemas';
+import { Json } from '@/types/database';
 
 export async function GET(req: Request) {
   try {
@@ -72,7 +74,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    await enforceRateLimit(req, 'submit_rating', 10, 60);
+    enforceRateLimit(req, 'submit_rating', 10, 60);
 
     // 2. Validate request payload
     const body = await req.json();
@@ -84,7 +86,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const { busId, bookingId, rating, review } = parseResult.data;
+    const { busId, bookingId, rating, review, accessToken: schemaToken } = parseResult.data;
+    const providedToken = schemaToken || body.accessToken;
     const supabase = getSupabaseAdminClient();
 
     // 3. Optional user auth
@@ -112,8 +115,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'You can only rate trips booked under your account.' }, { status: 403 });
       }
     } else {
-      // For guest, accessToken is mandatory and must match to prevent unverified review spoofing
-      if (!body.accessToken || !booking.access_token || body.accessToken !== booking.access_token) {
+      // For guest, accessToken is mandatory and verified against hash or token
+      if (!providedToken) {
+        return NextResponse.json({ error: 'Valid booking access token is required to submit a verified review.' }, { status: 403 });
+      }
+
+      const providedHash = crypto.createHash('sha256').update(providedToken).digest('hex');
+      const storedHash = (booking as Record<string, unknown>).access_token_hash as string | undefined;
+      const storedToken = booking.access_token;
+
+      const tokenMatches =
+        (storedHash && (storedHash === providedHash || storedHash === providedToken)) ||
+        (storedToken && (storedToken === providedToken || storedToken === providedHash));
+
+      if (!tokenMatches) {
         return NextResponse.json({ error: 'Valid booking access token is required to submit a verified review.' }, { status: 403 });
       }
     }
@@ -126,7 +141,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'This booking was for a different bus.' }, { status: 400 });
     }
 
-    // 5. Check if this booking was already reviewed
+    // 5. Check if this booking was already reviewed (anti-review stuffing)
     const { data: existingReview } = await supabase
       .from('bus_reviews')
       .select('id')
@@ -158,7 +173,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Failed to record review.' }, { status: 500 });
     }
 
-    // 7. Calculate new aggregate rating for bus
+    // 7. Audit Log
+    try {
+      await supabase.from('audit_logs').insert([{
+        action: 'bus_rating_submitted',
+        resource_type: 'bus',
+        resource_id: busId,
+        actor_id: authUser ? authUser.uid : null,
+        metadata: {
+          bookingId,
+          rating
+        } as unknown as Json,
+        created_at: new Date().toISOString()
+      }]);
+    } catch (auditErr) {
+      console.warn("Non-critical: Audit log insert error:", auditErr);
+    }
+
+    // 8. Calculate new aggregate rating for bus
     const { data: busReviews } = await supabase
       .from('bus_reviews')
       .select('rating')

@@ -24,7 +24,11 @@ import {
   verifyTicketSchema,
   cancelBookingSchema,
   submitBusRatingSchema,
-  linkAccountSchema
+  linkAccountSchema,
+  createBusSchema,
+  updateBusSchema,
+  updateProfileSchema,
+  ownerRegisterSchema
 } from '../src/lib/validation/schemas';
 
 // In-Memory Transactional Cell with Compare-And-Swap simulation
@@ -803,6 +807,435 @@ async function runTestSuite() {
     myAvailability[1].is_mine === true && myAvailability[0].is_mine === false,
     'Correctly identifies caller-owned seat without exposing raw foreign user IDs'
   );
+
+  // ----------------------------------------------------
+  // SUITE 15: Cross-Tenant Fleet Isolation & IDOR Protection
+  // ----------------------------------------------------
+  console.log('\n--- Suite 15: Cross-Tenant Fleet Isolation & IDOR Protection ---');
+
+  interface MockBusRecord {
+    id: string;
+    owner_id: string;
+    name: string;
+    status: 'active' | 'maintenance' | 'inactive';
+  }
+
+  const busDatabase: MockBusRecord[] = [
+    { id: 'BUS-OWNER-A-1', owner_id: 'owner_user_A', name: 'Super Express A', status: 'active' },
+    { id: 'BUS-OWNER-A-2', owner_id: 'owner_user_A', name: 'Deluxe A', status: 'maintenance' },
+    { id: 'BUS-OWNER-B-1', owner_id: 'owner_user_B', name: 'Southern Rider B', status: 'active' },
+  ];
+
+  function simulateListBuses(caller: { uid: string; role: string }, requestedOwnerId?: string): MockBusRecord[] {
+    if (caller.role === 'Admin') {
+      if (requestedOwnerId) {
+        return busDatabase.filter((b) => b.owner_id === requestedOwnerId);
+      }
+      return busDatabase;
+    }
+    // Strict multi-tenant isolation: Non-admins can ONLY view their own fleet
+    return busDatabase.filter((b) => b.owner_id === caller.uid);
+  }
+
+  function simulateUpdateBus(
+    caller: { uid: string; role: string },
+    busId: string,
+    newStatus: 'active' | 'maintenance' | 'inactive'
+  ): { success: boolean; statusCode: number; error?: string } {
+    const bus = busDatabase.find((b) => b.id === busId);
+    if (!bus) return { success: false, statusCode: 404, error: 'Bus not found' };
+
+    if (caller.role !== 'Admin' && bus.owner_id !== caller.uid) {
+      return { success: false, statusCode: 403, error: 'Access denied: You do not own this bus.' };
+    }
+
+    bus.status = newStatus;
+    return { success: true, statusCode: 200 };
+  }
+
+  function simulateScheduleTrip(
+    caller: { uid: string; role: string },
+    busId: string
+  ): { success: boolean; statusCode: number; error?: string } {
+    const bus = busDatabase.find((b) => b.id === busId);
+    if (!bus) return { success: false, statusCode: 404, error: 'Bus not found' };
+
+    if (caller.role !== 'Admin' && bus.owner_id !== caller.uid) {
+      return { success: false, statusCode: 403, error: 'Access denied: You do not own this bus.' };
+    }
+
+    if (bus.status !== 'active') {
+      return { success: false, statusCode: 400, error: `Cannot schedule trips for bus with '${bus.status}' status.` };
+    }
+
+    return { success: true, statusCode: 200 };
+  }
+
+  // 15a: Non-admin Owner A cannot view Owner B's buses, even when passing ?ownerId=owner_user_B
+  const ownerAList = simulateListBuses({ uid: 'owner_user_A', role: 'Owner' }, 'owner_user_B');
+  assert(
+    ownerAList.length === 2 && ownerAList.every((b) => b.owner_id === 'owner_user_A'),
+    'Enforces multi-tenant fleet isolation: Owner A cannot inspect competitor fleet via ownerId parameter'
+  );
+
+  // 15b: Admin can query all buses or filter by any ownerId
+  const adminList = simulateListBuses({ uid: 'admin_root', role: 'Admin' });
+  const adminFilteredList = simulateListBuses({ uid: 'admin_root', role: 'Admin' }, 'owner_user_B');
+  assert(adminList.length === 3, 'Administrator has complete fleet visibility across all operators');
+  assert(adminFilteredList.length === 1 && adminFilteredList[0].id === 'BUS-OWNER-B-1', 'Administrator can filter fleet by ownerId');
+
+  // 15c: Cross-tenant bus update IDOR attack (Owner A tries to modify Owner B's bus)
+  const crossUpdateAttempt = simulateUpdateBus({ uid: 'owner_user_A', role: 'Owner' }, 'BUS-OWNER-B-1', 'maintenance');
+  assert(
+    !crossUpdateAttempt.success && crossUpdateAttempt.statusCode === 403,
+    'Blocks cross-tenant bus status tampering with 403 Forbidden'
+  );
+
+  // 15d: Cross-tenant trip schedule hijack (Owner A attempts to schedule trip on Owner B's bus)
+  const crossScheduleAttempt = simulateScheduleTrip({ uid: 'owner_user_A', role: 'Owner' }, 'BUS-OWNER-B-1');
+  assert(
+    !crossScheduleAttempt.success && crossScheduleAttempt.statusCode === 403,
+    'Blocks cross-tenant trip scheduling on competitor bus with 403 Forbidden'
+  );
+
+  // ----------------------------------------------------
+  // SUITE 16: Profile Role Escalation & Privilege Defense
+  // ----------------------------------------------------
+  console.log('\n--- Suite 16: Profile Role Escalation & Privilege Defense ---');
+
+  interface MockProfile {
+    id: string;
+    name: string;
+    phone: string | null;
+    role: 'Passenger' | 'Owner' | 'Conductor' | 'Admin';
+  }
+
+  const profilesStore: Record<string, MockProfile> = {
+    'user_passenger_1': { id: 'user_passenger_1', name: 'Nimal Silva', phone: '0771112233', role: 'Passenger' },
+    'user_admin_1': { id: 'user_admin_1', name: 'Master Admin', phone: '0779998877', role: 'Admin' },
+  };
+
+  function simulateUpdateProfile(
+    caller: { uid: string; role: string },
+    payload: { name?: string; phone?: string; role?: string }
+  ): { success: boolean; profile: MockProfile } {
+    const profile = profilesStore[caller.uid];
+    // Defense: Explicitly only update name and phone; role can NEVER be modified from profile update
+    if (payload.name !== undefined) profile.name = payload.name.trim();
+    if (payload.phone !== undefined) profile.phone = payload.phone.trim();
+    return { success: true, profile };
+  }
+
+  function simulateRegisterOwner(
+    caller: { uid: string; role: string },
+    payload: { name: string; phone: string; nic: string; address: string }
+  ): { success: boolean; newRole: string } {
+    // Defense: If caller is already Admin, role remains Admin (no demotion)
+    const newRole = caller.role === 'Admin' ? 'Admin' : 'Owner';
+    profilesStore[caller.uid].name = payload.name;
+    profilesStore[caller.uid].phone = payload.phone;
+    profilesStore[caller.uid].role = newRole as MockProfile['role'];
+    return { success: true, newRole };
+  }
+
+  // 16a: Normal passenger attempts to elevate role to Admin via profile update
+  simulateUpdateProfile({ uid: 'user_passenger_1', role: 'Passenger' }, { role: 'Admin', name: 'Nimal Silva Hacked' });
+  assert(
+    profilesStore['user_passenger_1'].role === 'Passenger',
+    'Prevents profile role escalation: role column is strictly ignored and untrusted from client update'
+  );
+
+  // 16b: Existing Admin registering operator account does NOT get demoted to Owner
+  const adminOwnerReg = simulateRegisterOwner(
+    { uid: 'user_admin_1', role: 'Admin' },
+    { name: 'Admin Fleet Services', phone: '0779998877', nic: '199012345678', address: '123 Galle Rd, Colombo' }
+  );
+  assert(
+    adminOwnerReg.newRole === 'Admin' && profilesStore['user_admin_1'].role === 'Admin',
+    'Prevents accidental privilege demotion of Admin accounts during operator onboarding'
+  );
+
+  // 16c: Validation schemas reject invalid phone and NIC
+  assert(!updateProfileSchema.safeParse({ phone: 'invalid-phone-num' }).success, 'updateProfileSchema rejects invalid phone format');
+  assert(!ownerRegisterSchema.safeParse({ name: 'A', phone: '0771234567', nic: '123', address: 'Short' }).success, 'ownerRegisterSchema rejects malformed inputs');
+  assert(ownerRegisterSchema.safeParse({ name: 'Valid Transport', phone: '0771234567', nic: '912345678V', address: '100 Kandy Road' }).success, 'ownerRegisterSchema accepts valid Sri Lankan NIC and phone');
+
+  // ----------------------------------------------------
+  // SUITE 17: Payment Gateway Hash Authorization & State Guards
+  // ----------------------------------------------------
+  console.log('\n--- Suite 17: Payment Gateway Hash Authorization & State Guards ---');
+
+  interface MockBookingForPayment {
+    id: string;
+    user_id: string | null;
+    status: string;
+    total_amount: number;
+    access_token_hash?: string;
+    access_token?: string;
+  }
+
+  const paymentBookings: Record<string, MockBookingForPayment> = {
+    'BK-PAY-PENDING-USER': { id: 'BK-PAY-PENDING-USER', user_id: 'user_legit_buyer', status: 'pending', total_amount: 3200.00 },
+    'BK-PAY-CONFIRMED': { id: 'BK-PAY-CONFIRMED', user_id: 'user_legit_buyer', status: 'confirmed', total_amount: 3200.00 },
+    'BK-PAY-CANCELLED': { id: 'BK-PAY-CANCELLED', user_id: 'user_legit_buyer', status: 'cancelled', total_amount: 3200.00 },
+    'BK-PAY-PENDING-GUEST': {
+      id: 'BK-PAY-PENDING-GUEST',
+      user_id: null,
+      status: 'pending',
+      total_amount: 2500.00,
+      access_token_hash: crypto.createHash('sha256').update('secret_guest_token_123').digest('hex')
+    }
+  };
+
+  function simulateGeneratePaymentHash(
+    orderId: string,
+    caller?: { uid: string; role: string },
+    guestToken?: string
+  ): { success: boolean; statusCode: number; error?: string; formattedAmount?: string; hash?: string } {
+    const booking = paymentBookings[orderId];
+    if (!booking) return { success: false, statusCode: 404, error: 'Booking not found' };
+
+    // Strict State Machine: Payment hash can ONLY be generated for pending reservations
+    if (booking.status !== 'pending') {
+      return { success: false, statusCode: 400, error: `Cannot initiate payment for booking with status '${booking.status}'` };
+    }
+
+    // Ownership Authorization
+    if (booking.user_id) {
+      if (!caller || (caller.uid !== booking.user_id && caller.role !== 'Admin')) {
+        return { success: false, statusCode: 403, error: 'Access denied: You do not own this booking reservation.' };
+      }
+    } else {
+      if (guestToken && booking.access_token_hash) {
+        const hash = crypto.createHash('sha256').update(guestToken).digest('hex');
+        if (hash !== booking.access_token_hash) {
+          return { success: false, statusCode: 403, error: 'Invalid access token for this guest reservation.' };
+        }
+      }
+    }
+
+    const formattedAmount = booking.total_amount.toFixed(2);
+    const mockHash = crypto.createHash('md5').update(`123456${orderId}${formattedAmount}LKR${merchantSecret}`).digest('hex').toUpperCase();
+    return { success: true, statusCode: 200, formattedAmount, hash: mockHash };
+  }
+
+  // 17a: Rejects payment hash for already confirmed reservation
+  const confirmedHashAttempt = simulateGeneratePaymentHash('BK-PAY-CONFIRMED', { uid: 'user_legit_buyer', role: 'Passenger' });
+  assert(!confirmedHashAttempt.success && confirmedHashAttempt.statusCode === 400, 'Rejects payment hash generation for already confirmed bookings');
+
+  // 17b: Rejects payment hash for cancelled reservation
+  const cancelledHashAttempt = simulateGeneratePaymentHash('BK-PAY-CANCELLED', { uid: 'user_legit_buyer', role: 'Passenger' });
+  assert(!cancelledHashAttempt.success && cancelledHashAttempt.statusCode === 400, 'Rejects payment hash generation for cancelled bookings');
+
+  // 17c: User B attempts to generate payment hash for User A's reservation (IDOR)
+  const idorHashAttempt = simulateGeneratePaymentHash('BK-PAY-PENDING-USER', { uid: 'attacker_user_X', role: 'Passenger' });
+  assert(!idorHashAttempt.success && idorHashAttempt.statusCode === 403, 'Rejects unauthorized payment hash request with 403 Forbidden (IDOR defense)');
+
+  // 17d: Valid pending reservation permits payment hash with authoritative formatted amount
+  const validHashResult = simulateGeneratePaymentHash('BK-PAY-PENDING-USER', { uid: 'user_legit_buyer', role: 'Passenger' });
+  assert(validHashResult.success && validHashResult.formattedAmount === '3200.00', 'Generates authoritative payment hash with formatted amount for verified buyer');
+
+  // 17e: Guest payment hash with invalid token rejected
+  const badGuestHash = simulateGeneratePaymentHash('BK-PAY-PENDING-GUEST', undefined, 'wrong_token');
+  assert(!badGuestHash.success && badGuestHash.statusCode === 403, 'Rejects guest payment hash request with forged or invalid accessToken');
+
+  // ----------------------------------------------------
+  // SUITE 18: Booking Data Minimization & Privacy Protection
+  // ----------------------------------------------------
+  console.log('\n--- Suite 18: Booking Data Minimization & Privacy Protection ---');
+
+  interface FullBookingData {
+    id: string;
+    bookingReference: string;
+    passengerName: string;
+    passengerEmail: string;
+    passengerPhone: string;
+    accessToken: string;
+    totalAmount: number;
+    fares: {
+      ticketAmount: number;
+      serviceFee?: number;
+      platformCommission?: number;
+      gatewayFee?: number;
+      ownerNetAmount?: number;
+      total?: number;
+    };
+  }
+
+  const rawBooking: FullBookingData = {
+    id: 'BK-CONF-777',
+    bookingReference: 'SLB-888-999',
+    passengerName: 'Kamal Gunaratne',
+    passengerEmail: 'kamal.gunaratne@example.com',
+    passengerPhone: '0771234567',
+    accessToken: 'secret_cleartext_token',
+    totalAmount: 4000,
+    fares: {
+      ticketAmount: 3600,
+      serviceFee: 400,
+      platformCommission: 300,
+      gatewayFee: 100,
+      ownerNetAmount: 3300,
+      total: 4000
+    }
+  };
+
+  function simulateDataMinimizationLookup(booking: FullBookingData, isStronglyAuthorized: boolean) {
+    const sanitized = JSON.parse(JSON.stringify(booking)) as FullBookingData;
+
+    // Rule 1: Never leak access token in lookup response
+    sanitized.accessToken = '';
+
+    // Rule 2: Strip internal operator margins from customer responses
+    if (sanitized.fares) {
+      sanitized.fares = {
+        ticketAmount: sanitized.fares.ticketAmount,
+        serviceFee: sanitized.fares.serviceFee,
+        total: sanitized.fares.total || sanitized.totalAmount
+      };
+    }
+
+    // Rule 3: Mask PII if verified ONLY via passenger phone
+    if (!isStronglyAuthorized) {
+      if (sanitized.passengerEmail) {
+        const parts = sanitized.passengerEmail.split('@');
+        const namePart = parts[0] || '';
+        sanitized.passengerEmail = `${namePart[0]}***@${parts[1]}`;
+      }
+      if (sanitized.passengerPhone) {
+        const p = sanitized.passengerPhone;
+        sanitized.passengerPhone = `${p.slice(0, 3)}****${p.slice(-3)}`;
+      }
+    }
+
+    return sanitized;
+  }
+
+  // 18a: Phone-only verification masks passenger email and phone number
+  const phoneOnlyLookup = simulateDataMinimizationLookup(rawBooking, false);
+  assert(
+    phoneOnlyLookup.passengerEmail.includes('***') && !phoneOnlyLookup.passengerEmail.includes('kamal.gunaratne'),
+    'Masks passenger email on phone-only lookup (e.g. k***@example.com)'
+  );
+  assert(
+    phoneOnlyLookup.passengerPhone === '077****567',
+    'Masks passenger phone number on phone-only lookup (e.g. 077****567)'
+  );
+
+  // 18b: Internal operator commissions are completely stripped
+  assert(
+    !('platformCommission' in phoneOnlyLookup.fares) && !('ownerNetAmount' in phoneOnlyLookup.fares),
+    'Strips internal platform commission and owner net amount from lookup payload'
+  );
+
+  // 18c: Access tokens are zeroed out
+  assert(phoneOnlyLookup.accessToken === '', 'Zeroes out raw access token in lookup response');
+
+  // ----------------------------------------------------
+  // SUITE 19: Fleet Input Sanitization & Maintenance Safety
+  // ----------------------------------------------------
+  console.log('\n--- Suite 19: Fleet Input Sanitization & Maintenance Safety ---');
+
+  // 19a: Seats range checks
+  assert(!createBusSchema.safeParse({ name: 'Coach', regNumber: 'NB-1234', type: 'AC', totalSeats: 5 }).success, 'Rejects bus registration with seats < 10');
+  assert(!createBusSchema.safeParse({ name: 'Coach', regNumber: 'NB-1234', type: 'AC', totalSeats: 120 }).success, 'Rejects bus registration with seats > 80');
+  assert(createBusSchema.safeParse({ name: 'Coach', regNumber: 'NB-1234', type: 'AC', totalSeats: 49 }).success, 'Accepts valid bus registration specifications');
+
+  // 19b: Bus status validation
+  assert(!updateBusSchema.safeParse({ status: 'destroyed' }).success, 'Rejects invalid bus status transition');
+  assert(updateBusSchema.safeParse({ status: 'maintenance' }).success, 'Accepts valid status: maintenance');
+
+  // 19c: Cannot schedule trip on maintenance bus
+  const maintenanceTripAttempt = simulateScheduleTrip({ uid: 'owner_user_A', role: 'Owner' }, 'BUS-OWNER-A-2');
+  assert(
+    !maintenanceTripAttempt.success && maintenanceTripAttempt.statusCode === 400,
+    'Blocks scheduling trip on bus that is in maintenance or inactive status'
+  );
+
+  // ----------------------------------------------------
+  // SUITE 20: Verified Review Authenticity & Review Stuffing Protection
+  // ----------------------------------------------------
+  console.log('\n--- Suite 20: Verified Review Authenticity & Review Stuffing Protection ---');
+
+  interface MockReviewBooking {
+    id: string;
+    bus_id: string;
+    user_id: string | null;
+    status: string;
+    access_token_hash?: string;
+  }
+
+  const reviewBookings: Record<string, MockReviewBooking> = {
+    'BK-REV-CONF': {
+      id: 'BK-REV-CONF',
+      bus_id: 'BUS-1',
+      user_id: null,
+      status: 'confirmed',
+      access_token_hash: crypto.createHash('sha256').update('valid_rev_token').digest('hex')
+    },
+    'BK-REV-PENDING': {
+      id: 'BK-REV-PENDING',
+      bus_id: 'BUS-1',
+      user_id: null,
+      status: 'pending'
+    }
+  };
+
+  const existingReviews = new Set<string>();
+
+  function simulateSubmitReview(
+    bookingId: string,
+    busId: string,
+    rating: number,
+    providedToken?: string
+  ): { success: boolean; statusCode: number; error?: string } {
+    const booking = reviewBookings[bookingId];
+    if (!booking) return { success: false, statusCode: 404, error: 'Booking not found' };
+
+    // Eligibility: must be confirmed or boarded
+    if (booking.status !== 'confirmed' && booking.status !== 'boarded') {
+      return { success: false, statusCode: 400, error: 'Only confirmed or completed journeys can be reviewed.' };
+    }
+
+    // Bus match
+    if (booking.bus_id !== busId) {
+      return { success: false, statusCode: 400, error: 'This booking was for a different bus.' };
+    }
+
+    // Token match
+    if (booking.access_token_hash) {
+      if (!providedToken) return { success: false, statusCode: 403, error: 'Access token required' };
+      const hash = crypto.createHash('sha256').update(providedToken).digest('hex');
+      if (hash !== booking.access_token_hash) {
+        return { success: false, statusCode: 403, error: 'Invalid access token' };
+      }
+    }
+
+    // Anti-duplicate review
+    const reviewKey = `${busId}:${bookingId}`;
+    if (existingReviews.has(reviewKey)) {
+      return { success: false, statusCode: 409, error: 'You have already submitted a review for this journey.' };
+    }
+
+    existingReviews.add(reviewKey);
+    return { success: true, statusCode: 200 };
+  }
+
+  // 20a: Cannot review pending unconfirmed booking
+  const pendingRevAttempt = simulateSubmitReview('BK-REV-PENDING', 'BUS-1', 5);
+  assert(!pendingRevAttempt.success && pendingRevAttempt.statusCode === 400, 'Rejects review submission for unconfirmed or pending reservations');
+
+  // 20b: Guest review requires matching access token
+  const badGuestRev = simulateSubmitReview('BK-REV-CONF', 'BUS-1', 5, 'forged_token');
+  assert(!badGuestRev.success && badGuestRev.statusCode === 403, 'Rejects guest review when access token hash does not match');
+
+  // 20c: Legitimate review accepted
+  const legitRev = simulateSubmitReview('BK-REV-CONF', 'BUS-1', 5, 'valid_rev_token');
+  assert(legitRev.success && legitRev.statusCode === 200, 'Accepts authentic verified passenger review');
+
+  // 20d: Duplicate review blocked with 409 Conflict
+  const dupRevAttempt = simulateSubmitReview('BK-REV-CONF', 'BUS-1', 4, 'valid_rev_token');
+  assert(!dupRevAttempt.success && dupRevAttempt.statusCode === 409, 'Rejects duplicate review submission with 409 Conflict (anti-review stuffing)');
 
   // ----------------------------------------------------
   // TEST SUMMARY

@@ -2,12 +2,17 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireOwner } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
+import { createBusSchema, formatZodError } from '@/lib/validation/schemas';
 import { Bus } from '@/types/bus';
+import { Json } from '@/types/database';
 
 export async function GET(req: Request) {
   try {
+    // 1. Authoritative Fleet Authorization: Only verified Owners or Admins can list buses
+    const authenticatedUser = await requireOwner(req);
     const { searchParams } = new URL(req.url);
-    const ownerId = searchParams.get('ownerId');
+    const requestedOwnerId = searchParams.get('ownerId');
 
     const supabase = getSupabaseAdminClient();
     let query = supabase
@@ -15,8 +20,13 @@ export async function GET(req: Request) {
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (ownerId) {
-      query = query.eq('owner_id', ownerId);
+    // Multi-tenant Fleet Isolation: Non-admins can strictly ONLY view their own fleet
+    if (authenticatedUser.role === 'Admin') {
+      if (requestedOwnerId) {
+        query = query.eq('owner_id', requestedOwnerId);
+      }
+    } else {
+      query = query.eq('owner_id', authenticatedUser.uid);
     }
 
     const { data: busesData, error } = await query;
@@ -44,15 +54,28 @@ export async function GET(req: Request) {
     return NextResponse.json({ buses });
 
   } catch (error: unknown) {
-    const err = error as Error;
-    return NextResponse.json({ error: err.message || 'Failed to fetch buses' }, { status: 500 });
+    const err = error as { statusCode?: number; message?: string };
+    const status = err.statusCode || 500;
+    return NextResponse.json({ error: err.message || 'Failed to fetch buses' }, { status });
   }
 }
 
 export async function POST(req: Request) {
   try {
+    // 1. Rate limiting & Server authentication
+    enforceRateLimit(req, 'create_bus', 15, 60);
     const authenticatedUser = await requireOwner(req);
-    const body = await req.json();
+
+    // 2. Strict Zod payload validation
+    const rawBody = await req.json();
+    const parseResult = createBusSchema.safeParse(rawBody);
+
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: formatZodError(parseResult.error) },
+        { status: 400 }
+      );
+    }
 
     const {
       name,
@@ -60,17 +83,14 @@ export async function POST(req: Request) {
       type,
       totalSeats,
       seatLayout,
-      amenities = [],
-      imageUrl = ''
-    } = body;
-
-    if (!name || !regNumber || !type || !totalSeats) {
-      return NextResponse.json({ error: 'Missing required bus specifications' }, { status: 400 });
-    }
+      amenities,
+      imageUrl
+    } = parseResult.data;
 
     const supabase = getSupabaseAdminClient();
     const busId = `BUS-${crypto.randomUUID()}`;
 
+    // 3. Database insertion with server-bound owner ID
     const { error: insertError } = await supabase
       .from('buses')
       .insert([{
@@ -79,9 +99,9 @@ export async function POST(req: Request) {
         name: name.trim(),
         reg_number: regNumber.trim().toUpperCase(),
         type: type.trim(),
-        total_seats: Number(totalSeats),
-        seat_layout: seatLayout || {},
-        amenities: amenities,
+        total_seats: totalSeats,
+        seat_layout: seatLayout as unknown as Json,
+        amenities: amenities || [],
         image_url: imageUrl || null,
         status: 'active',
         created_at: new Date().toISOString(),
@@ -94,6 +114,24 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'A bus with this registration number is already registered.' }, { status: 409 });
       }
       return NextResponse.json({ error: 'Failed to register bus in database.' }, { status: 500 });
+    }
+
+    // 4. Audit Log
+    try {
+      await supabase.from('audit_logs').insert([{
+        action: 'bus_created',
+        resource_type: 'bus',
+        resource_id: busId,
+        actor_id: authenticatedUser.uid,
+        metadata: {
+          name: name.trim(),
+          regNumber: regNumber.trim().toUpperCase(),
+          totalSeats
+        } as unknown as Json,
+        created_at: new Date().toISOString()
+      }]);
+    } catch (auditErr) {
+      console.warn("Non-critical: Audit log insert error:", auditErr);
     }
 
     return NextResponse.json({

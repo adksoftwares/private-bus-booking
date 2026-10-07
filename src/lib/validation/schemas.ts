@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { MAX_SEATS_PER_BOOKING } from '@/lib/constants';
 
 // Sri Lankan phone number regex: supports 077..., 9477..., +9477..., 77...
-const sriLankanPhoneRegex = /^(?:\+?94|0)?[1-9]\d{8}$/;
+export const sriLankanPhoneRegex = /^(?:\+?94|0)?[1-9]\d{8}$/;
+
+// Sri Lankan NIC regex: 9 digits + V/X or 12 digits
+export const sriLankanNicRegex = /^(?:[0-9]{9}[vVxX]|[0-9]{12})$/;
 
 export const createPendingBookingSchema = z.object({
   tripId: z.string().min(1, 'Trip ID is required'),
@@ -74,11 +77,63 @@ export const updateTripSchema = z.object({
   arrivalTime: z.string().regex(/^\d{2}:\d{2}$/, 'Valid arrival time (HH:MM) is required').optional()
 });
 
+export const createBusSchema = z.object({
+  name: z.string().trim().min(2, 'Bus/Operator name must be at least 2 characters').max(100),
+  regNumber: z
+    .string()
+    .trim()
+    .min(3, 'Registration number is too short')
+    .max(20, 'Registration number is too long')
+    .regex(/^[A-Za-z0-9\s-]+$/, 'Registration number contains invalid characters'),
+  type: z.string().trim().min(2, 'Bus type must be specified').max(50),
+  totalSeats: z.coerce.number().int().min(10, 'Bus must have at least 10 seats').max(80, 'Bus cannot exceed 80 seats'),
+  seatLayout: z.record(z.string(), z.any()).optional().default({}),
+  amenities: z.array(z.string()).optional().default([]),
+  imageUrl: z.string().trim().optional().or(z.literal(''))
+});
+
+export const updateBusSchema = z.object({
+  status: z.enum(['active', 'maintenance', 'inactive'])
+});
+
+export const updateProfileSchema = z.object({
+  name: z.string().trim().min(2, 'Name must be at least 2 characters').max(100).optional(),
+  phone: z
+    .string()
+    .trim()
+    .refine(
+      val => !val || sriLankanPhoneRegex.test(val.replace(/[\s-]/g, '')),
+      'Please enter a valid Sri Lankan mobile phone number'
+    )
+    .optional()
+    .nullable()
+});
+
+export const ownerRegisterSchema = z.object({
+  name: z.string().trim().min(2, 'Full or company name must be at least 2 characters').max(100),
+  phone: z
+    .string()
+    .trim()
+    .refine(
+      val => sriLankanPhoneRegex.test(val.replace(/[\s-]/g, '')),
+      'Please enter a valid Sri Lankan mobile phone number'
+    ),
+  nic: z
+    .string()
+    .trim()
+    .refine(
+      val => sriLankanNicRegex.test(val.replace(/[\s-]/g, '')),
+      'Please enter a valid Sri Lankan NIC number (9 digits + V/X or 12 digits)'
+    ),
+  address: z.string().trim().min(5, 'Address must be at least 5 characters').max(200)
+});
+
 export const submitBusRatingSchema = z.object({
   busId: z.string().min(1, 'Bus ID is required'),
   bookingId: z.string().min(1, 'Booking ID is required'),
   rating: z.number().int().min(1, 'Rating must be at least 1').max(5, 'Rating cannot exceed 5'),
-  review: z.string().max(500, 'Review cannot exceed 500 characters').optional()
+  review: z.string().max(500, 'Review cannot exceed 500 characters').optional(),
+  accessToken: z.string().optional()
 });
 
 export function formatZodError(error: z.ZodError): string {
@@ -87,4 +142,3 @@ export function formatZodError(error: z.ZodError): string {
   }
   return 'Invalid input data';
 }
-

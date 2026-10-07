@@ -316,7 +316,8 @@ export async function lookupBookingByReference(
   } as unknown as Booking;
 
   // Authorization Check
-  let isAuthorized = false;
+  let isStronglyAuthorized = false;
+  let isPhoneAuthorized = false;
 
   if (accessToken) {
     const providedHash = crypto.createHash('sha256').update(accessToken).digest('hex');
@@ -326,19 +327,19 @@ export async function lookupBookingByReference(
       (storedHash && (storedHash === providedHash || storedHash === accessToken)) ||
       (storedToken && (storedToken === accessToken || storedToken === providedHash))
     ) {
-      isAuthorized = true;
+      isStronglyAuthorized = true;
     }
   } else if (authenticatedUserId && booking.userId && authenticatedUserId === booking.userId) {
-    isAuthorized = true;
+    isStronglyAuthorized = true;
   } else if (providedPhone) {
     const normProvided = normalizeSriLankanPhone(providedPhone);
     const normPassenger = normalizeSriLankanPhone(booking.passengerPhone || '');
     if (normProvided && normPassenger && normProvided === normPassenger) {
-      isAuthorized = true;
+      isPhoneAuthorized = true;
     }
   }
 
-  if (!isAuthorized) {
+  if (!isStronglyAuthorized && !isPhoneAuthorized) {
     throw new HttpError(
       403,
       'Access verification required. Please verify with the passenger phone number or access token.'
@@ -347,6 +348,40 @@ export async function lookupBookingByReference(
 
   // Prevent token leakage: Never expose access token or hash in the lookup response
   booking.accessToken = '';
+
+  // Data Minimization: Strip internal financial commissions and operator margins from passenger lookup
+  if (booking.fares) {
+    booking.fares = {
+      ticketAmount: booking.fares.ticketAmount,
+      serviceFee: booking.fares.serviceFee,
+      total: booking.fares.total || booking.totalAmount
+    };
+  }
+
+  // Privacy Protection: When verified only via phone (without secret token or account credentials),
+  // mask PII to protect against passenger phone enumeration / scraping
+  if (!isStronglyAuthorized) {
+    if (booking.passengerEmail) {
+      const parts = booking.passengerEmail.split('@');
+      const namePart = parts[0] || '';
+      const domainPart = parts[1] || '';
+      const maskedName = namePart.length > 2
+        ? `${namePart[0]}***${namePart[namePart.length - 1]}`
+        : `${namePart[0]}***`;
+      booking.passengerEmail = `${maskedName}@${domainPart}`;
+    }
+    if (booking.passengerPhone) {
+      const p = booking.passengerPhone;
+      booking.passengerPhone = p.length > 4 ? `${p.slice(0, 3)}****${p.slice(-3)}` : '****';
+    }
+    if (booking.passengerDetails) {
+      booking.passengerDetails = {
+        ...booking.passengerDetails,
+        phone: booking.passengerPhone,
+        email: booking.passengerEmail
+      };
+    }
+  }
 
   // Fetch full trip details
   const { data: tripData } = await supabase

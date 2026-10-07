@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireAuth } from '@/lib/auth-server';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 import { Booking } from '@/types/booking';
 
 export async function GET(req: Request) {
   try {
+    enforceRateLimit(req, 'user_bookings', 30, 60);
     const user = await requireAuth(req);
     const supabase = getSupabaseAdminClient();
 
@@ -22,7 +24,7 @@ export async function GET(req: Request) {
     const bookings: Booking[] = (bookingsData || []).map(b => ({
       id: b.id,
       bookingReference: b.booking_reference,
-      accessToken: b.access_token,
+      accessToken: '', // Token minimization: Do not leak access tokens in bulk lists
       bookingType: b.booking_type,
       tripId: b.trip_id,
       userId: b.user_id,

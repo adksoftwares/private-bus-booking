@@ -389,6 +389,34 @@ export default function PaymentPage() {
               </div>
             </div>
 
+            {/* Sandbox Test Cards Helper */}
+            <div className="mt-4 p-4 rounded-2xl bg-amber-50/80 border border-amber-200/80">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  PayHere Sandbox Test Cards
+                </span>
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-200/60 px-2 py-0.5 rounded-full">
+                  Test Mode
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="bg-white p-2.5 rounded-xl border border-amber-100 shadow-xs">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Visa (Success)</div>
+                  <div className="font-mono font-black text-slate-800 text-sm select-all tracking-wide">4111 1111 1111 1111</div>
+                  <div className="text-[11px] text-slate-500 font-mono mt-0.5">Exp: 12/28 • CVV: 123</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-xl border border-amber-100 shadow-xs">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">MasterCard (Success)</div>
+                  <div className="font-mono font-black text-slate-800 text-sm select-all tracking-wide">5200 8282 8282 8282</div>
+                  <div className="text-[11px] text-slate-500 font-mono mt-0.5">Exp: 12/28 • CVV: 123</div>
+                </div>
+              </div>
+              <div className="mt-2 text-[11px] text-amber-800 flex items-center gap-1.5">
+                <span>💡 OTP கேட்கப்பட்டால் <strong>123456</strong> அல்லது <strong>Submit</strong> கொடுக்கவும்.</span>
+              </div>
+            </div>
+
           </div>
 
           {/* Checkout CTA Footer */}

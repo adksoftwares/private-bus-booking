@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { SeatLayout } from '@/types/trip';
 import { SeatLock } from '@/types/booking';
-import { Check } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 
 interface SeatMapProps {
   tripId: string;
@@ -41,7 +41,7 @@ const SeatButton = memo(function SeatButton({
 }: SeatButtonProps) {
   let seatStyle = 'bg-white border-slate-300 text-slate-800 hover:border-orange-500 hover:shadow-sm';
   if (isBooked) {
-    seatStyle = 'bg-slate-200/90 border-slate-300 text-slate-400 opacity-60 cursor-not-allowed';
+    seatStyle = 'bg-red-500 border-red-600 text-white font-bold cursor-not-allowed shadow-inner';
   } else if (isLockedByOther) {
     seatStyle = 'bg-amber-50 border-amber-300 text-amber-700 cursor-not-allowed';
   } else if (isSelected || isLockedByMe) {
@@ -57,7 +57,7 @@ const SeatButton = memo(function SeatButton({
       title={`${seatId} • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
     >
       {/* Headrest curve top accent */}
-      <div className={`w-6 h-1 rounded-full mb-0.5 ${isSelected || isLockedByMe ? 'bg-orange-400' : 'bg-slate-200'}`} />
+      <div className={`w-6 h-1 rounded-full mb-0.5 ${isSelected || isLockedByMe ? 'bg-orange-400' : isBooked ? 'bg-red-400' : 'bg-slate-200'}`} />
 
       <span className="text-[11px] sm:text-xs font-black tracking-tight leading-none">
         {seatId}
@@ -66,6 +66,8 @@ const SeatButton = memo(function SeatButton({
       <div className="flex items-center gap-0.5 leading-none">
         {isSelected ? (
           <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
+        ) : isBooked ? (
+          <X className="w-3.5 h-3.5 stroke-[3] text-white/90" />
         ) : (
           <span className={`text-[8.5px] font-black uppercase ${
             seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'
@@ -519,7 +521,9 @@ export default function SeatMap({
           <span>Reserved (10m)</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-slate-200 border-2 border-slate-300 rounded-sm opacity-60"></div> 
+          <div className="w-4 h-4 bg-red-500 border-2 border-red-600 rounded-sm flex items-center justify-center">
+            <X className="w-2.5 h-2.5 stroke-[3] text-white" />
+          </div> 
           <span>Booked</span>
         </div>
       </div>

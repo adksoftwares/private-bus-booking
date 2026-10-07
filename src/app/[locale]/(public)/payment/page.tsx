@@ -193,8 +193,20 @@ export default function PaymentPage() {
 
       // 3. Register client event listeners on PayHere SDK
       if (typeof window !== 'undefined' && window.payhere) {
-        window.payhere.onCompleted = function onCompleted() {
+        window.payhere.onCompleted = async function onCompleted() {
           sessionStorage.removeItem('bookingDraft');
+          try {
+            await authFetch('/api/payhere/confirm-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                orderId: booking.id,
+                accessToken: rawToken || undefined
+              })
+            });
+          } catch (confirmErr) {
+            console.error('Client payment confirmation error:', confirmErr);
+          }
           router.push(`/ticket/${booking.id}${returnTokenQuery}`);
         };
 

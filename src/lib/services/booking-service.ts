@@ -222,6 +222,7 @@ export async function createPendingBooking(params: CreateBookingParams) {
     conflicting_seat?: string;
     message?: string;
     total_amount?: number;
+    c_code?: string;
   };
 
   if (!res || !res.success) {
@@ -235,6 +236,7 @@ export async function createPendingBooking(params: CreateBookingParams) {
   }
 
   const authoritativeTotal = Number(res.total_amount);
+  const cCode = res.c_code;
 
   // 4. Generate PayHere Checkout Signature
   const merchantId = process.env.NEXT_PUBLIC_PAYHERE_MERCHANT_ID || '';
@@ -253,6 +255,7 @@ export async function createPendingBooking(params: CreateBookingParams) {
     id: orderId,
     bookingId: orderId,
     bookingReference,
+    cCode,
     accessToken: rawAccessToken,
     bookingType,
     totalAmount: authoritativeTotal,

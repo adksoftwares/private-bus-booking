@@ -243,6 +243,7 @@ export interface Database {
         Row: {
           id: string;
           booking_reference: string;
+          c_code: string | null;
           access_token: string;
           access_token_hash: string | null;
           booking_type: BookingType;
@@ -270,6 +271,7 @@ export interface Database {
         Insert: {
           id: string;
           booking_reference: string;
+          c_code?: string | null;
           access_token?: string;
           access_token_hash?: string | null;
           booking_type?: BookingType;
@@ -297,6 +299,7 @@ export interface Database {
         Update: {
           id?: string;
           booking_reference?: string;
+          c_code?: string | null;
           access_token?: string;
           access_token_hash?: string | null;
           booking_type?: BookingType;

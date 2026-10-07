@@ -24,14 +24,34 @@ export async function POST(req: Request) {
     }
 
     const { bookingId: rawId, action } = parseResult.data;
-    const cleanId = rawId.trim();
+    let cleanId = rawId.trim();
+
+    // If conductor scanned the full QR code payload with camera/barcode reader:
+    const cCodeMatch = cleanId.match(/C-CODE:\s*(?:C-)?(\d{6})/i);
+    const refMatch = cleanId.match(/REF:\s*([A-Z0-9-]+)/i);
+    const idMatch = cleanId.match(/\b(BK-[a-f0-9-]+)\b/i);
+
+    if (refMatch) {
+      cleanId = refMatch[1].trim();
+    } else if (cCodeMatch) {
+      cleanId = cCodeMatch[1].trim();
+    } else if (idMatch) {
+      cleanId = idMatch[1].trim();
+    }
+
+    const cClean = cleanId.replace(/^C-/i, '');
     const supabase = getSupabaseAdminClient();
 
-    // 4. Resolve Booking by ID or Reference
+    // 4. Resolve Booking by ID, Reference, or 6-digit C-Code
+    let queryFilter = `id.eq.${cleanId},booking_reference.eq.${cleanId}`;
+    if (/^\d{6}$/.test(cClean)) {
+      queryFilter += `,c_code.eq.${cClean}`;
+    }
+
     const { data: booking, error: findError } = await supabase
       .from('bookings')
       .select('*')
-      .or(`id.eq.${cleanId},booking_reference.eq.${cleanId}`)
+      .or(queryFilter)
       .maybeSingle();
 
     if (findError || !booking) {

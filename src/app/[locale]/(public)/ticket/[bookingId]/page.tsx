@@ -296,6 +296,35 @@ export default function TicketPage() {
   const arrivalTime = trip?.arrivalTime || booking.tripSnapshot?.arrivalTime || '';
   const duration = trip?.duration || booking.tripSnapshot?.duration || '';
 
+  const cCode = booking.cCode || (booking as unknown as { c_code?: string })?.c_code || (function deriveCode(id: string) {
+    if (!id) return '100001';
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = ((hash << 5) - hash) + id.charCodeAt(i);
+      hash |= 0;
+    }
+    return String(Math.abs(hash) % 900000 + 100000);
+  })(booking.id);
+  const formattedCCode = `C-${cCode}`;
+
+  // Authoritative QR Payload encoding all journey, vehicle, passenger, and security verification specs
+  const qrPayload = [
+    `SRI LANKA INTERCITY EXPRESS PASS`,
+    `C-CODE: ${formattedCCode}`,
+    `REF: ${displayRef}`,
+    `STATUS: ${(booking.status || 'CONFIRMED').toUpperCase()}`,
+    `FROM: ${startCity} (Central Bus Stand)`,
+    `TO: ${endCity} (Main Bus Stand)`,
+    `DATE: ${departureDate}`,
+    `DEP: ${departureTime}${arrivalTime ? ` (Arr: ${arrivalTime})` : ''}`,
+    `COACH PLATE: ${busRegNumber || 'Express Fleet'}`,
+    `BUS MODEL: ${busName} (${busType})`,
+    `PASSENGER: ${passengerName}`,
+    `PHONE: ${passengerPhone}`,
+    `ASSIGNED SEATS: ${(booking.seats || []).join(', ')}`,
+    `TOTAL FARE: Rs. ${Number(totalAmount).toFixed(2)}`
+  ].join('\n');
+
   return (
     <div className="max-w-3xl mx-auto my-8 px-4 sm:px-6">
       
@@ -493,6 +522,15 @@ export default function TicketPage() {
                     ))}
                   </div>
                 </div>
+
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-orange-600 font-black">C-Code (Verification)</span>
+                  <div className="mt-1">
+                    <span className="inline-block font-mono text-xs font-black tracking-widest bg-orange-100 text-orange-950 px-2.5 py-0.5 rounded-md border border-orange-300 shadow-2xs select-none">
+                      {formattedCCode}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -524,26 +562,53 @@ export default function TicketPage() {
               </span>
 
               {/* QR Code Container */}
-              <div className="bg-white p-3.5 rounded-2xl shadow-md border border-slate-200 mb-3.5 print:shadow-none print:border-slate-800">
-                <QRCodeSVG value={displayRef} size={135} level="H" />
+              <div className="bg-white p-3 rounded-2xl shadow-md border border-slate-200 mb-3.5 print:shadow-none print:border-slate-800">
+                <QRCodeSVG value={qrPayload} size={150} level="M" />
               </div>
 
-              {/* Booking Reference with Quick Copy */}
-              <div className="w-full">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Reference No.
-                </span>
-                <div className="flex items-center justify-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1.5 rounded-xl shadow-2xs w-full">
-                  <span className="font-mono text-xs font-black tracking-wider text-slate-800 truncate">
-                    {displayRef}
+              {/* 6-Digit C-Code & Booking Reference */}
+              <div className="w-full space-y-2">
+                {/* 6-Digit C-Code */}
+                <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-300 rounded-xl p-2.5 text-center shadow-xs">
+                  <div className="flex items-center justify-between px-1 mb-0.5">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-orange-700">
+                      Conductor C-Code
+                    </span>
+                    <span className="text-[9px] font-bold text-orange-600 bg-orange-200/60 px-1.5 py-0.2 rounded">
+                      6-Digit
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span className="font-mono text-base font-black tracking-widest text-slate-900 select-all">
+                      {formattedCCode}
+                    </span>
+                    <button
+                      onClick={() => handleCopyReference(formattedCCode)}
+                      className="text-slate-400 hover:text-orange-600 transition p-1 cursor-pointer print:hidden"
+                      title="Copy C-Code"
+                    >
+                      {copiedRef ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Booking Reference with Quick Copy */}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                    Reference No.
                   </span>
-                  <button
-                    onClick={() => handleCopyReference(displayRef)}
-                    className="text-slate-400 hover:text-orange-600 transition p-1 cursor-pointer print:hidden"
-                    title="Copy Reference"
-                  >
-                    {copiedRef ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
+                  <div className="flex items-center justify-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1.5 rounded-xl shadow-2xs w-full">
+                    <span className="font-mono text-xs font-black tracking-wider text-slate-800 truncate">
+                      {displayRef}
+                    </span>
+                    <button
+                      onClick={() => handleCopyReference(displayRef)}
+                      className="text-slate-400 hover:text-orange-600 transition p-1 cursor-pointer print:hidden"
+                      title="Copy Reference"
+                    >
+                      {copiedRef ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                 </div>
               </div>
 

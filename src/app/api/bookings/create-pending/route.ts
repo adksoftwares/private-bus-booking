@@ -32,6 +32,7 @@ export async function POST(req: Request) {
       success: true,
       orderId: booking.id,
       bookingReference: booking.bookingReference,
+      cCode: booking.cCode,
       accessToken: booking.accessToken,
       bookingType: booking.bookingType,
       amount: booking.totalAmount,

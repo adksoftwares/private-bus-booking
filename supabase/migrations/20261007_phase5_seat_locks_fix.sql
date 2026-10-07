@@ -186,6 +186,7 @@ DECLARE
     v_user_uuid UUID := NULL;
     v_effective_user_id TEXT;
     v_sorted_seats TEXT[];
+    v_c_code TEXT;
 BEGIN
     IF p_user_id IS NOT NULL AND p_user_id <> '' AND p_user_id <> 'null' THEN
         BEGIN
@@ -268,10 +269,14 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- Generate unique 6-digit C-code
+    v_c_code := LPAD((nextval('public.booking_c_code_seq'))::TEXT, 6, '0');
+
     -- 1. Insert Booking Record FIRST so foreign key seat_locks_booking_id_fkey is satisfied
     INSERT INTO public.bookings (
         id,
         booking_reference,
+        c_code,
         access_token,
         access_token_hash,
         booking_type,
@@ -293,6 +298,7 @@ BEGIN
     ) VALUES (
         p_order_id,
         p_booking_reference,
+        v_c_code,
         '',
         p_access_token_hash,
         p_booking_type::booking_type,
@@ -354,6 +360,7 @@ BEGIN
         jsonb_build_object(
             'seats', v_sorted_seats,
             'amount', v_ticket_amount,
+            'c_code', v_c_code,
             'expires_at', v_expires_at
         )
     );
@@ -362,6 +369,7 @@ BEGIN
         'success', true,
         'order_id', p_order_id,
         'booking_reference', p_booking_reference,
+        'c_code', v_c_code,
         'total_amount', v_ticket_amount,
         'seats', v_sorted_seats,
         'expires_at', v_expires_at

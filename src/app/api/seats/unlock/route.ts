@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
+import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 
 export async function POST(req: Request) {
   try {
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
       console.error("Seat unlock RPC error:", rpcError);
       return NextResponse.json({ error: rpcError.message }, { status: 500 });
     }
+
+    // Invalidate seat status cache for this trip so subsequent reads get updated state immediately
+    invalidateTripSeatsCache(tripId);
 
     return NextResponse.json({ success: true, releasedSeat: seatId });
 

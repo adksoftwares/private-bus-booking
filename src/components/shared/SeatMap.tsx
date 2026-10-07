@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { SeatLayout } from '@/types/trip';
@@ -10,16 +10,89 @@ import { Check } from 'lucide-react';
 interface SeatMapProps {
   tripId: string;
   layout: SeatLayout;
+  selectedSeats?: string[];
   onSeatSelect?: (seatIds: string[]) => void;
   readOnly?: boolean;
 }
 
-export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false }: SeatMapProps) {
+interface SeatButtonProps {
+  seatId: string;
+  seatType: { code: 'W' | 'A' | 'M' | 'VIP' | 'C'; label: string };
+  isBooked: boolean;
+  isLockedByOther: boolean;
+  isSelected: boolean;
+  isLockedByMe: boolean;
+  seatSize: string;
+  readOnly: boolean;
+  onClick: (seatId: string) => void;
+}
+
+// Memoized individual seat button for 60fps rendering without re-rendering unaffected seats
+const SeatButton = memo(function SeatButton({
+  seatId,
+  seatType,
+  isBooked,
+  isLockedByOther,
+  isSelected,
+  isLockedByMe,
+  seatSize,
+  readOnly,
+  onClick
+}: SeatButtonProps) {
+  let seatStyle = 'bg-white border-slate-300 text-slate-800 hover:border-orange-500 hover:shadow-sm';
+  if (isBooked) {
+    seatStyle = 'bg-slate-200/90 border-slate-300 text-slate-400 opacity-60 cursor-not-allowed';
+  } else if (isLockedByOther) {
+    seatStyle = 'bg-amber-50 border-amber-300 text-amber-700 cursor-not-allowed';
+  } else if (isSelected || isLockedByMe) {
+    seatStyle = 'bg-orange-600 border-orange-700 text-white shadow-sm ring-2 ring-orange-200';
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={readOnly || isBooked || isLockedByOther}
+      onClick={() => onClick(seatId)}
+      className={`${seatSize} relative flex flex-col items-center justify-between py-1.5 px-0.5 border-2 rounded-t-xl rounded-b-md transition-all duration-75 shrink-0 ${seatStyle} ${(!isBooked && !isLockedByOther) ? 'active:scale-95 cursor-pointer' : ''}`}
+      title={`${seatId} • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
+    >
+      {/* Headrest curve top accent */}
+      <div className={`w-6 h-1 rounded-full mb-0.5 ${isSelected || isLockedByMe ? 'bg-orange-400' : 'bg-slate-200'}`} />
+
+      <span className="text-[11px] sm:text-xs font-black tracking-tight leading-none">
+        {seatId}
+      </span>
+      
+      <div className="flex items-center gap-0.5 leading-none">
+        {isSelected ? (
+          <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
+        ) : (
+          <span className={`text-[8.5px] font-black uppercase ${
+            seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'
+          }`}>
+            {seatType.code}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+});
+
+export default function SeatMap({ 
+  tripId, 
+  layout, 
+  selectedSeats: initialSelectedSeats, 
+  onSeatSelect, 
+  readOnly = false 
+}: SeatMapProps) {
   const { user, authFetch } = useAuth();
   const [seatStatuses, setSeatStatuses] = useState<Record<string, SeatLock>>({});
-  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
-  const inFlightSeatsRef = useRef<Set<string>>(new Set());
-  const [now, setNow] = useState(() => Date.now());
+  const [selectedSeats, setSelectedSeats] = useState<string[]>(() => initialSelectedSeats || []);
+  
+  // Track user's intended state per seat so rapid clicks never get out of sync with network
+  const targetSeatIntentRef = useRef<Map<string, boolean>>(new Map());
+  const pendingRequestsRef = useRef<Map<string, AbortController>>(new Map());
+
   const [guestSessionId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       let sid = sessionStorage.getItem('bus_guest_session_id');
@@ -38,13 +111,6 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
   useEffect(() => {
     onSeatSelectRef.current = onSeatSelect;
   }, [onSeatSelect]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setNow(Date.now());
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   const fetchSeatStatuses = useCallback(async () => {
     if (!tripId) return;
@@ -127,9 +193,9 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     };
   }, [tripId, fetchSeatStatuses, effectiveUserId, authFetch]);
 
-  const handleSeatClick = (seatId: string) => {
+  // Non-blocking, instant 0.00ms physical feedback handler
+  const handleSeatClick = useCallback((seatId: string) => {
     if (readOnly || !effectiveUserId) return;
-    if (inFlightSeatsRef.current.has(seatId)) return; // Prevent duplicate concurrent clicks on the same seat
 
     const status = seatStatuses[seatId];
     if (status?.status === 'booked') return;
@@ -139,44 +205,23 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
       return;
     }
 
-    const isAlreadySelected = selectedSeats.includes(seatId);
-    const fetcher = authFetch || fetch;
+    const isCurrentlySelected = selectedSeats.includes(seatId);
+    const willBeSelected = !isCurrentlySelected;
 
-    if (isAlreadySelected) {
-      // 1. Instant UI Deselection in 0ms
-      const updated = selectedSeats.filter(s => s !== seatId);
-      setSelectedSeats(updated);
-      setSeatStatuses(prev => {
-        const copy = { ...prev };
-        delete copy[seatId];
-        return copy;
-      });
-      if (onSeatSelect) onSeatSelect(updated);
+    if (willBeSelected && selectedSeats.length >= 6) {
+      alert("Maximum 6 seats allowed per reservation.");
+      return;
+    }
 
-      // 2. Asynchronous background unlock
-      inFlightSeatsRef.current.add(seatId);
-      fetcher('/api/seats/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tripId,
-          seatId,
-          guestSessionId: effectiveUserId
-        })
-      })
-        .catch(err => console.warn("Background unlock failed:", err))
-        .finally(() => {
-          inFlightSeatsRef.current.delete(seatId);
-        });
-    } else {
-      if (selectedSeats.length >= 6) {
-        alert("Maximum 6 seats allowed per reservation.");
-        return;
-      }
+    // 1. Instant 0.00ms UI Update
+    const nextSelected = willBeSelected 
+      ? [...selectedSeats, seatId] 
+      : selectedSeats.filter(s => s !== seatId);
 
-      // 1. Instant UI Selection in 0ms: highlight seat immediately
-      const updated = [...selectedSeats, seatId];
-      setSelectedSeats(updated);
+    setSelectedSeats(nextSelected);
+    targetSeatIntentRef.current.set(seatId, willBeSelected);
+
+    if (willBeSelected) {
       setSeatStatuses(prev => ({
         ...prev,
         [seatId]: {
@@ -186,10 +231,27 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           expiresAt: Date.now() + 600000
         }
       }));
-      if (onSeatSelect) onSeatSelect(updated);
+    } else {
+      setSeatStatuses(prev => {
+        const copy = { ...prev };
+        delete copy[seatId];
+        return copy;
+      });
+    }
 
-      // 2. Asynchronous background lock
-      inFlightSeatsRef.current.add(seatId);
+    if (onSeatSelect) onSeatSelect(nextSelected);
+
+    // 2. Abort previous pending in-flight request for this seat to eliminate race conditions
+    const prevController = pendingRequestsRef.current.get(seatId);
+    if (prevController) {
+      prevController.abort();
+    }
+
+    const abortController = new AbortController();
+    pendingRequestsRef.current.set(seatId, abortController);
+    const fetcher = authFetch || fetch;
+
+    if (willBeSelected) {
       fetcher('/api/seats/lock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -197,34 +259,82 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           tripId,
           seatId,
           guestSessionId: effectiveUserId
-        })
+        }),
+        signal: abortController.signal
       })
         .then(async res => {
+          if (abortController.signal.aborted) return;
           const resData = await res.json();
+
+          // Check if user has since unselected this seat
+          if (!targetSeatIntentRef.current.get(seatId)) {
+            fetcher('/api/seats/unlock', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tripId, seatId, guestSessionId: effectiveUserId })
+            }).catch(() => {});
+            return;
+          }
+
           if (!res.ok || !resData.success) {
-            // Revert optimistic selection on failure/conflict
-            setSelectedSeats(prev => prev.filter(s => s !== seatId));
+            // Revert optimistic selection on genuine conflict/failure
+            setSelectedSeats(prev => {
+              const reverted = prev.filter(s => s !== seatId);
+              if (onSeatSelectRef.current) onSeatSelectRef.current(reverted);
+              return reverted;
+            });
             setSeatStatuses(prev => {
               const copy = { ...prev };
               delete copy[seatId];
               return copy;
             });
-            if (onSeatSelectRef.current) {
-              onSeatSelectRef.current(selectedSeats.filter(s => s !== seatId));
-            }
-
+            targetSeatIntentRef.current.set(seatId, false);
             alert(resData.message || resData.error || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
             fetchSeatStatuses();
           }
         })
         .catch(err => {
-          console.error("Seat reservation error:", err);
+          if (err.name === 'AbortError') return;
+          console.warn("Background lock error:", err);
         })
         .finally(() => {
-          inFlightSeatsRef.current.delete(seatId);
+          if (pendingRequestsRef.current.get(seatId) === abortController) {
+            pendingRequestsRef.current.delete(seatId);
+          }
+        });
+    } else {
+      fetcher('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tripId,
+          seatId,
+          guestSessionId: effectiveUserId
+        }),
+        signal: abortController.signal
+      })
+        .then(async () => {
+          if (abortController.signal.aborted) return;
+          // If user re-selected before unlock finished, restore lock
+          if (targetSeatIntentRef.current.get(seatId)) {
+            fetcher('/api/seats/lock', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tripId, seatId, guestSessionId: effectiveUserId })
+            }).catch(() => {});
+          }
+        })
+        .catch(err => {
+          if (err.name === 'AbortError') return;
+          console.warn("Background unlock failed:", err);
+        })
+        .finally(() => {
+          if (pendingRequestsRef.current.get(seatId) === abortController) {
+            pendingRequestsRef.current.delete(seatId);
+          }
         });
     }
-  };
+  }, [readOnly, effectiveUserId, seatStatuses, selectedSeats, onSeatSelect, tripId, authFetch, fetchSeatStatuses]);
 
   const rawType = (layout?.type || '').toLowerCase().replace(':', 'x').replace('+', 'x');
   const is2x3 = rawType === '2x3' || rawType === '3x2' || layout?.cols === 5;
@@ -270,6 +380,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
   const renderGrid = () => {
     const grid = [];
     let seatNumber = 1;
+    const now = Date.now();
 
     for (let r = 0; r < rows; r++) {
       const row = [];
@@ -313,16 +424,6 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           const isLockedByMe = statusInfo?.status === 'locked' && Boolean(statusInfo.isMine || statusInfo.userId === effectiveUserId);
           const isLockedByOther = statusInfo?.status === 'locked' && !statusInfo.isMine && statusInfo.userId !== effectiveUserId && Boolean(statusInfo.expiresAt && statusInfo.expiresAt > now);
           const isSelected = selectedSeats.includes(seatId);
-          
-          let seatStyle = 'bg-white border-slate-300 text-slate-800 hover:border-orange-500 hover:shadow-sm';
-          
-          if (isBooked) {
-            seatStyle = 'bg-slate-200/90 border-slate-300 text-slate-400 opacity-60 cursor-not-allowed';
-          } else if (isLockedByOther) {
-            seatStyle = 'bg-amber-50 border-amber-300 text-amber-700 cursor-not-allowed';
-          } else if (isSelected || isLockedByMe) {
-            seatStyle = 'bg-orange-600 border-orange-700 text-white shadow-sm ring-2 ring-orange-200';
-          }
 
           const seatSize = is2x3 
             ? 'w-10 sm:w-11 h-13 sm:h-14' 
@@ -331,33 +432,18 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
             : 'w-11 sm:w-12 h-14 sm:h-15';
 
           row.push(
-            <button
+            <SeatButton
               key={seatId}
-              type="button"
-              disabled={readOnly || isBooked || isLockedByOther}
-              onClick={() => handleSeatClick(seatId)}
-              className={`${seatSize} relative flex flex-col items-center justify-between py-1.5 px-0.5 border-2 rounded-t-xl rounded-b-md transition-all duration-75 shrink-0 ${seatStyle} ${(!isBooked && !isLockedByOther) ? 'active:scale-95 cursor-pointer' : ''}`}
-              title={`${seatId} • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
-            >
-              {/* Headrest curve top accent */}
-              <div className={`w-6 h-1 rounded-full mb-0.5 ${isSelected || isLockedByMe ? 'bg-orange-400' : 'bg-slate-200'}`} />
-
-              <span className="text-[11px] sm:text-xs font-black tracking-tight leading-none">
-                {seatId}
-              </span>
-              
-              <div className="flex items-center gap-0.5 leading-none">
-                {isSelected ? (
-                  <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
-                ) : (
-                  <span className={`text-[8.5px] font-black uppercase ${
-                    seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'
-                  }`}>
-                    {seatType.code}
-                  </span>
-                )}
-              </div>
-            </button>
+              seatId={seatId}
+              seatType={seatType}
+              isBooked={isBooked}
+              isLockedByOther={isLockedByOther}
+              isSelected={isSelected}
+              isLockedByMe={isLockedByMe}
+              seatSize={seatSize}
+              readOnly={readOnly}
+              onClick={handleSeatClick}
+            />
           );
         }
       }

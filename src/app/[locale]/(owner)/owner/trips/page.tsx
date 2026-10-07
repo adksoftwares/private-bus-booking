@@ -354,6 +354,11 @@ export default function OwnerTripsPage() {
                   <Link
                     href={`/book/${trip.id}`}
                     target="_blank"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        try { sessionStorage.setItem(`trip_cache_${trip.id}`, JSON.stringify(trip)); } catch {}
+                      }
+                    }}
                     className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-orange-600 hover:border-orange-200 hover:bg-orange-50 transition cursor-pointer shadow-2xs"
                     title="View Passenger Seat Selection"
                   >

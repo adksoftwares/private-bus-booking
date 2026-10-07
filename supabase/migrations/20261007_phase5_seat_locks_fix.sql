@@ -159,3 +159,4 @@ GRANT EXECUTE ON FUNCTION public.create_pending_booking_atomic TO anon, authenti
 GRANT EXECUTE ON FUNCTION public.confirm_booking_seats_atomic TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.process_payment_webhook_atomic TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.cancel_booking_atomic TO anon, authenticated, service_role;
+GRANT SELECT ON public.seat_locks TO anon, authenticated, service_role;

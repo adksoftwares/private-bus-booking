@@ -26,8 +26,16 @@ export default function BookingPage() {
   const router = useRouter();
   const t = useTranslations('booking');
   
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [trip, setTrip] = useState<Trip | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem(`trip_cache_${tripId}`);
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(() => !trip);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   
@@ -77,6 +85,9 @@ export default function BookingPage() {
         if (!isMounted) return;
         if (data.trip) {
           setTrip(data.trip);
+          if (typeof window !== 'undefined') {
+            try { sessionStorage.setItem(`trip_cache_${tripId}`, JSON.stringify(data.trip)); } catch {}
+          }
         } else {
           setTrip(null);
         }
@@ -287,6 +298,7 @@ export default function BookingPage() {
               <SeatMap 
                 tripId={tripId as string} 
                 layout={trip.busSnapshot.seatLayout} 
+                selectedSeats={selectedSeats}
                 onSeatSelect={setSelectedSeats} 
               />
             ) : (

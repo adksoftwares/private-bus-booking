@@ -503,7 +503,12 @@ function SearchResults() {
                   </div>
 
                   <button 
-                    onClick={() => router.push(`/book/${trip.id}`)}
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        try { sessionStorage.setItem(`trip_cache_${trip.id}`, JSON.stringify(trip)); } catch {}
+                      }
+                      router.push(`/book/${trip.id}`);
+                    }}
                     className="bg-orange-600 hover:bg-orange-700 active:scale-95 text-white px-6 py-3.5 rounded-2xl shadow-md hover:shadow-lg font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap"
                   >
                     <span>Select Seats & Book</span>

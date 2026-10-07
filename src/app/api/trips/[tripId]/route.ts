@@ -5,9 +5,38 @@ import { enforceRateLimit } from '@/lib/rate-limiter';
 import { updateTripSchema, formatZodError } from '@/lib/validation/schemas';
 import { Database, Json } from '@/types/database';
 
+// High-performance server-side in-memory cache for trips
+interface CachedTripEntry {
+  trip: any;
+  cachedAt: number;
+}
+const tripMemoryCache = new Map<string, CachedTripEntry>();
+const TRIP_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
+
+export function invalidateTripCache(tripId?: string) {
+  if (tripId) {
+    tripMemoryCache.delete(tripId);
+  } else {
+    tripMemoryCache.clear();
+  }
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
     const { tripId } = await params;
+    
+    // Check in-memory cache first (sub-millisecond response)
+    const cached = tripMemoryCache.get(tripId);
+    const now = Date.now();
+    if (cached && (now - cached.cachedAt) < TRIP_CACHE_TTL_MS) {
+      return NextResponse.json({ trip: cached.trip }, {
+        headers: {
+          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+          'X-Cache': 'HIT'
+        }
+      });
+    }
+
     const supabase = getAuthenticatedRequestClient(req);
 
     const { data: trip, error } = await supabase
@@ -20,22 +49,33 @@ export async function GET(req: Request, { params }: { params: Promise<{ tripId: 
       return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
     }
 
-    return NextResponse.json({
-      trip: {
-        id: trip.id,
-        busId: trip.bus_id,
-        ownerId: trip.owner_id,
-        routeId: trip.route_id,
-        routeSnapshot: trip.route_snapshot,
-        busSnapshot: trip.bus_snapshot,
-        departureDate: trip.departure_date,
-        departureTime: trip.departure_time,
-        arrivalTime: trip.arrival_time,
-        duration: trip.duration,
-        baseFare: trip.base_fare,
-        farePerSeat: trip.fare_per_seat,
-        operatorName: trip.operator_name,
-        status: trip.status
+    const formattedTrip = {
+      id: trip.id,
+      busId: trip.bus_id,
+      ownerId: trip.owner_id,
+      routeId: trip.route_id,
+      routeSnapshot: trip.route_snapshot,
+      busSnapshot: trip.bus_snapshot,
+      departureDate: trip.departure_date,
+      departureTime: trip.departure_time,
+      arrivalTime: trip.arrival_time,
+      duration: trip.duration,
+      baseFare: trip.base_fare,
+      farePerSeat: trip.fare_per_seat,
+      operatorName: trip.operator_name,
+      status: trip.status
+    };
+
+    // Store in memory cache
+    tripMemoryCache.set(tripId, {
+      trip: formattedTrip,
+      cachedAt: now
+    });
+
+    return NextResponse.json({ trip: formattedTrip }, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+        'X-Cache': 'MISS'
       }
     });
   } catch (err: unknown) {
@@ -96,6 +136,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ tripId
       console.error("Failed to update trip:", updateError);
       return NextResponse.json({ error: 'Failed to update trip' }, { status: 500 });
     }
+
+    // Invalidate server memory cache immediately
+    invalidateTripCache(tripId);
 
     // 3. Audit Log
     try {

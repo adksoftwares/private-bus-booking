@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { atomicLockSeats } from '@/lib/services/booking-service';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 import { enforceRateLimit } from '@/lib/rate-limiter';
+import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 
 export async function POST(req: Request) {
   try {
@@ -32,6 +33,9 @@ export async function POST(req: Request) {
         message: `Seat ${lockResult.conflictingSeat} is no longer available.`
       }, { status: 409 });
     }
+
+    // Invalidate seat status cache for this trip so subsequent reads get updated state immediately
+    invalidateTripSeatsCache(tripId);
 
     return NextResponse.json({
       success: true,

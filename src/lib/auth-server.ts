@@ -97,17 +97,24 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
       }
     }
 
-    // Fallback: Check SSR cookies if Authorization header was not present or valid
+    // Fallback: Check SSR cookies only if Supabase cookie tokens are present in incoming request
     if (!user) {
-      try {
-        const { createClient } = await import('@/lib/supabase/server');
-        const supabaseServer = await createClient();
-        const { data, error } = await supabaseServer.auth.getUser();
-        if (!error && data?.user) {
-          user = data.user;
+      const cookieHeader = req.headers.get('cookie') || '';
+      if (cookieHeader.includes('sb-') || cookieHeader.includes('auth-token')) {
+        try {
+          const { createClient } = await import('@/lib/supabase/server');
+          const supabaseServer = await createClient();
+          const getUserPromise = supabaseServer.auth.getUser();
+          const timeoutPromise = new Promise<{ data: { user: null }; error: Error }>((resolve) =>
+            setTimeout(() => resolve({ data: { user: null }, error: new Error('Auth timeout') }), 2500)
+          );
+          const { data, error } = await Promise.race([getUserPromise, timeoutPromise]);
+          if (!error && data?.user) {
+            user = data.user;
+          }
+        } catch {
+          // SSR cookies unavailable or timed out
         }
-      } catch {
-        // SSR cookies unavailable or running in context without cookies
       }
     }
 

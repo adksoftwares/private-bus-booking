@@ -15,7 +15,7 @@ interface SeatMapProps {
 }
 
 export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false }: SeatMapProps) {
-  const { user } = useAuth();
+  const { user, authFetch } = useAuth();
   const [seatStatuses, setSeatStatuses] = useState<Record<string, SeatLock>>({});
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [processingSeat, setProcessingSeat] = useState<string | null>(null);
@@ -49,19 +49,23 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
   const fetchSeatStatuses = useCallback(async () => {
     if (!tripId) return;
     try {
-      const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}&sessionId=${encodeURIComponent(effectiveUserId)}`);
+      const fetcher = authFetch || fetch;
+      const res = await fetcher(`/api/seats/status?tripId=${encodeURIComponent(tripId)}&sessionId=${encodeURIComponent(effectiveUserId)}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.statuses) {
         const statuses = data.statuses as Record<string, SeatLock>;
         setSeatStatuses(statuses);
 
-        // Deselect local seats if expired or claimed by another user
+        // Deselect local seats ONLY if explicitly booked or locked by another passenger
         setSelectedSeats(prev => {
           const filtered = prev.filter(s => {
             const sInfo = statuses[s];
-            const isMine = Boolean(sInfo && (sInfo.isMine || sInfo.userId === effectiveUserId));
-            return sInfo && sInfo.status === 'locked' && isMine;
+            if (!sInfo) return true; // keep optimistic selection while sync completes
+            if (sInfo.status === 'booked') return false;
+            const isLockedByOther = sInfo.status === 'locked' && !sInfo.isMine && sInfo.userId !== effectiveUserId;
+            if (isLockedByOther) return false;
+            return true;
           });
           if (filtered.length !== prev.length && onSeatSelectRef.current) {
             const cb = onSeatSelectRef.current;
@@ -73,7 +77,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     } catch (e) {
       console.warn("Error fetching seat statuses:", e);
     }
-  }, [tripId, effectiveUserId]);
+  }, [tripId, effectiveUserId, authFetch]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -81,7 +85,8 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     const loadInitialStatuses = async () => {
       if (!tripId) return;
       try {
-        const res = await fetch(`/api/seats/status?tripId=${encodeURIComponent(tripId)}&sessionId=${encodeURIComponent(effectiveUserId)}`);
+        const fetcher = authFetch || fetch;
+        const res = await fetcher(`/api/seats/status?tripId=${encodeURIComponent(tripId)}&sessionId=${encodeURIComponent(effectiveUserId)}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!isCancelled && data.statuses) {
@@ -120,7 +125,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
       channel.unsubscribe();
       clearInterval(pollInterval);
     };
-  }, [tripId, fetchSeatStatuses, effectiveUserId]);
+  }, [tripId, fetchSeatStatuses, effectiveUserId, authFetch]);
 
   const handleSeatClick = async (seatId: string) => {
     if (readOnly || !effectiveUserId || processingSeat) return;
@@ -129,7 +134,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
     if (status?.status === 'booked') return;
     
     const currentTime = Date.now();
-    if (status?.status === 'locked' && status.userId !== effectiveUserId && status.expiresAt && status.expiresAt > currentTime) {
+    if (status?.status === 'locked' && status.userId !== effectiveUserId && !status.isMine && status.expiresAt && status.expiresAt > currentTime) {
       return;
     }
 
@@ -137,10 +142,21 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
 
     try {
       const isAlreadySelected = selectedSeats.includes(seatId);
+      const fetcher = authFetch || fetch;
 
       if (isAlreadySelected) {
+        // Optimistic Deselection in 0ms
+        const updated = selectedSeats.filter(s => s !== seatId);
+        setSelectedSeats(updated);
+        setSeatStatuses(prev => {
+          const copy = { ...prev };
+          delete copy[seatId];
+          return copy;
+        });
+        if (onSeatSelect) onSeatSelect(updated);
+
         // Deselect -> Unlock seat via API
-        await fetch('/api/seats/unlock', {
+        await fetcher('/api/seats/unlock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -150,9 +166,6 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           })
         });
 
-        const updated = selectedSeats.filter(s => s !== seatId);
-        setSelectedSeats(updated);
-        if (onSeatSelect) onSeatSelect(updated);
         await fetchSeatStatuses();
       } else {
         if (selectedSeats.length >= 6) {
@@ -160,7 +173,21 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
           return;
         }
 
-        const res = await fetch('/api/seats/lock', {
+        // Optimistic Selection in 0ms: highlight seat immediately
+        const updated = [...selectedSeats, seatId];
+        setSelectedSeats(updated);
+        setSeatStatuses(prev => ({
+          ...prev,
+          [seatId]: {
+            status: 'locked',
+            isMine: true,
+            userId: effectiveUserId,
+            expiresAt: Date.now() + 600000
+          }
+        }));
+        if (onSeatSelect) onSeatSelect(updated);
+
+        const res = await fetcher('/api/seats/lock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -172,14 +199,20 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
 
         const resData = await res.json();
         if (!res.ok || !resData.success) {
+          // Revert optimistic selection on failure/conflict
+          setSelectedSeats(prev => prev.filter(s => s !== seatId));
+          setSeatStatuses(prev => {
+            const copy = { ...prev };
+            delete copy[seatId];
+            return copy;
+          });
+          if (onSeatSelect) onSeatSelect(selectedSeats.filter(s => s !== seatId));
+
           alert(resData.message || resData.error || `Seat ${seatId} was just reserved by another passenger. Please choose another seat.`);
           await fetchSeatStatuses();
           return;
         }
 
-        const updated = [...selectedSeats, seatId];
-        setSelectedSeats(updated);
-        if (onSeatSelect) onSeatSelect(updated);
         await fetchSeatStatuses();
       }
     } catch (err) {
@@ -298,7 +331,7 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
             <button
               key={seatId}
               type="button"
-              disabled={readOnly || isBooked || isLockedByOther || isProcessing}
+              disabled={readOnly || isBooked || isLockedByOther}
               onClick={() => handleSeatClick(seatId)}
               className={`${seatSize} relative flex flex-col items-center justify-between py-1.5 px-0.5 border-2 rounded-t-xl rounded-b-md transition-all duration-150 shrink-0 ${seatStyle} ${(!isBooked && !isLockedByOther) ? 'active:scale-95 cursor-pointer' : ''}`}
               title={`${seatId} • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
@@ -306,27 +339,23 @@ export default function SeatMap({ tripId, layout, onSeatSelect, readOnly = false
               {/* Headrest curve top accent */}
               <div className={`w-6 h-1 rounded-full mb-0.5 ${isSelected || isLockedByMe ? 'bg-orange-400' : 'bg-slate-200'}`} />
 
-              {isProcessing ? (
-                <div className="w-3.5 h-3.5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin my-auto"></div>
-              ) : (
-                <>
-                  <span className="text-[11px] sm:text-xs font-black tracking-tight leading-none">
-                    {seatId}
+              <span className="text-[11px] sm:text-xs font-black tracking-tight leading-none">
+                {seatId}
+              </span>
+              
+              <div className="flex items-center gap-0.5 leading-none">
+                {isProcessing ? (
+                  <div className={`w-3 h-3 border-2 ${isSelected ? 'border-white' : 'border-orange-500'} border-t-transparent rounded-full animate-spin`} />
+                ) : isSelected ? (
+                  <Check className="w-3 h-3 stroke-[3] text-white" />
+                ) : (
+                  <span className={`text-[8.5px] font-black uppercase ${
+                    seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'
+                  }`}>
+                    {seatType.code}
                   </span>
-                  
-                  <div className="flex items-center gap-0.5 leading-none">
-                    {isSelected ? (
-                      <Check className="w-3 h-3 stroke-[3] text-white" />
-                    ) : (
-                      <span className={`text-[8.5px] font-black uppercase ${
-                        seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'
-                      }`}>
-                        {seatType.code}
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
+                )}
+              </div>
             </button>
           );
         }

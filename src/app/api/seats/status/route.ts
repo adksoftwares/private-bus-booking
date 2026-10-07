@@ -15,8 +15,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'tripId is required' }, { status: 400 });
     }
 
-    const user = await getAuthenticatedUser(req);
-    const callerId = user?.uid || sessionId || null;
+    let callerId = sessionId || null;
+    const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const user = await getAuthenticatedUser(req);
+      if (user?.uid) callerId = user.uid;
+    }
     const supabase = getSupabaseAdminClient();
 
     // 1. Atomic PostgreSQL RPC get_trip_seat_availability (safe privacy-masked query & auto-sweep)

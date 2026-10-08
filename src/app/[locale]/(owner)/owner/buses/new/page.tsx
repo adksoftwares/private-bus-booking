@@ -19,6 +19,7 @@ import {
   Armchair,
   Users
 } from 'lucide-react';
+import { generateBusSeatGrid } from '@/lib/seat-layout';
 
 const SRI_LANKAN_PROVINCES = [
   { code: 'WP', name: 'Western (WP)' },
@@ -91,24 +92,11 @@ export default function NewBusPage() {
     ? (customRegNumber.trim().toUpperCase() || 'CUSTOM')
     : `${province} ${plateLetters || '••'}-${plateNumbers || '••••'}`;
 
-  // Sri Lankan Grid Dimensions
-  const cols = layoutType === '2x3' ? 5 : layoutType === '2+1' ? 3 : 4;
+  // Sri Lankan Grid Dimensions & Topology
+  const previewLayout = generateBusSeatGrid(layoutType, totalSeats, backRowType);
+  const cols = previewLayout.cols;
   const aisleCol = 2; // Always at index 2 (between 2 left seats and right seats)
-
-  // Calculate rows based on layout and back row
-  let rows = 10;
-  if (layoutType === '2x3') {
-    rows = Math.ceil(totalSeats / 5);
-  } else if (layoutType === '2+1') {
-    rows = Math.ceil(totalSeats / 3);
-  } else {
-    // 2x2
-    if (backRowType === '5-seater') {
-      rows = totalSeats <= 5 ? 1 : 1 + Math.ceil((totalSeats - 5) / 4);
-    } else {
-      rows = Math.ceil(totalSeats / 4);
-    }
-  }
+  const rows = previewLayout.rows;
 
   // Check if current seat capacity leaves an incomplete rear row in 2x2
   const isIncomplete2x2Bench = layoutType === '2x2' && backRowType === '5-seater' && totalSeats > 5 && ((totalSeats - 5) % 4 !== 0);
@@ -225,88 +213,60 @@ export default function NewBusPage() {
     }
   };
 
-  // Helper to render live visual seat map
+  // Helper to render live visual seat map matching authentic Sri Lankan bus coach
   const renderPreviewGrid = () => {
-    const previewRows = [];
-    let seatCount = 1;
-    const totalGridCols = layoutType === '2x3' ? 6 : layoutType === '2+1' ? 4 : 5;
-    const is2x2Connected = layoutType === '2x2' && backRowType === '5-seater';
-
-    for (let r = 0; r < rows; r++) {
-      const isLastRow = r === rows - 1;
-      const rowCols = [];
-
-      for (let c = 0; c < totalGridCols; c++) {
-        const isAisleCol = c === aisleCol;
-        const isBackCenterSeat = isLastRow && is2x2Connected && isAisleCol && seatCount <= totalSeats;
-
-        if (isAisleCol && !isBackCenterSeat) {
-          // Walkway Aisle column
-          rowCols.push(
-            <div 
-              key={`aisle-${r}`} 
-              className={`${layoutType === '2x3' ? 'w-4' : layoutType === '2+1' ? 'w-6' : 'w-5'} flex items-center justify-center`}
-            >
-              {isLastRow && layoutType === '2x3' ? (
-                <div className="w-full h-5 bg-slate-800 border border-slate-700 rounded flex items-center justify-center">
-                  <span className="text-[6.5px] font-bold text-slate-400">BENCH</span>
-                </div>
-              ) : (
+    return previewLayout.grid.map((rowCells, r) => (
+      <div key={`row-${r}`} className="flex items-center justify-center gap-1">
+        {rowCells.map((cell, c) => {
+          if (cell.type === 'aisle') {
+            return (
+              <div 
+                key={`aisle-${r}-${c}`} 
+                className={`${layoutType === '2x3' ? 'w-3.5' : layoutType === '2+1' ? 'w-6' : 'w-5'} flex items-center justify-center`}
+              >
                 <div className="h-full w-px border-r border-dashed border-slate-700"></div>
-              )}
-            </div>
-          );
-        } else {
-          if (seatCount > totalSeats) {
-            rowCols.push(
+              </div>
+            );
+          }
+
+          if (cell.type === 'empty') {
+            return (
               <div 
                 key={`empty-${r}-${c}`} 
-                className={`${layoutType === '2x3' ? 'w-5 h-6' : layoutType === '2+1' ? 'w-7 h-6' : 'w-6 h-6'} opacity-0`} 
+                className={`${layoutType === '2x3' ? 'w-6 h-6' : layoutType === '2+1' ? 'w-7 h-6' : 'w-6 h-6'} opacity-0`} 
               />
             );
-            continue;
           }
 
-          const currentNum = seatCount;
-          seatCount++;
+          const currentNum = cell.seatNumber;
+          const displayNum = cell.displayNumber;
+          const seatCode = cell.seatCode || 'W';
+          const isBackCenterSeat = seatCode === 'C';
 
-          let seatCode = 'W';
-          if (isBackCenterSeat) {
-            seatCode = 'C';
-          } else if (layoutType === '2x3') {
-            if (c === 0 || c === 5) seatCode = 'W';
-            else if (c === 1 || c === 3) seatCode = 'A';
-            else if (c === 4) seatCode = 'M';
-          } else if (layoutType === '2x2') {
-            if (c === 0 || c === 4) seatCode = 'W';
-            else if (c === 1 || c === 3) seatCode = 'A';
-          } else if (layoutType === '2+1') {
-            if (c === 0) seatCode = 'W';
-            else if (c === 1) seatCode = 'A';
-            else if (c === 3) seatCode = 'VIP';
-          }
-
-          rowCols.push(
+          return (
             <div
               key={`seat-${currentNum}`}
-              className={`${layoutType === '2x3' ? 'w-5.5 h-6 text-[8px]' : layoutType === '2+1' ? 'w-7 h-6 text-[9px]' : 'w-6 h-6 text-[8.5px]'} rounded bg-slate-800 border border-slate-700 flex flex-col items-center justify-center font-mono font-bold ${isBackCenterSeat ? 'border-amber-500/60 bg-amber-950/40 text-amber-300' : seatCode === 'VIP' ? 'border-purple-500/60 bg-purple-950/40 text-purple-300' : 'text-slate-200'}`}
-              title={`Seat S${currentNum} (${seatCode})`}
+              className="relative inline-flex items-center justify-center select-none"
+              title={`Seat S${currentNum} (${seatCode}) - ${cell.label}`}
             >
-              <span className="leading-none">{currentNum}</span>
-              <span className="text-[6px] text-slate-400 font-sans leading-none mt-0.5">{seatCode}</span>
+              {/* Mini Left Armrest */}
+              <div className="w-0.5 sm:w-1 h-4 bg-slate-900 border border-slate-700 rounded-l-xs shrink-0 -mr-[1px] z-0" />
+
+              {/* Mini Main Cushion */}
+              <div
+                className={`${layoutType === '2x3' ? 'w-5.5 h-6 text-[8px]' : layoutType === '2+1' ? 'w-7 h-6 text-[9px]' : 'w-6 h-6 text-[8.5px]'} rounded-t-sm rounded-b-2xs bg-slate-800 border border-slate-700 flex flex-col items-center justify-between py-0.5 font-mono font-bold z-10 ${isBackCenterSeat ? 'border-amber-500/60 bg-amber-950/40 text-amber-300' : seatCode === 'VIP' ? 'border-purple-500/60 bg-purple-950/40 text-purple-300' : 'text-slate-200'}`}
+              >
+                <span className="leading-none">{displayNum}</span>
+                <div className="w-2.5 h-0.5 bg-slate-950 rounded-2xs" />
+              </div>
+
+              {/* Mini Right Armrest */}
+              <div className="w-0.5 sm:w-1 h-4 bg-slate-900 border border-slate-700 rounded-r-xs shrink-0 -ml-[1px] z-0" />
             </div>
           );
-        }
-      }
-
-      previewRows.push(
-        <div key={`row-${r}`} className="flex items-center justify-between gap-1">
-          {rowCols}
-        </div>
-      );
-    }
-
-    return previewRows;
+        })}
+      </div>
+    ));
   };
 
   if (authLoading) {

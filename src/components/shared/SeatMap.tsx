@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { SeatLayout } from '@/types/trip';
 import { SeatLock } from '@/types/booking';
-import { Check, X } from 'lucide-react';
+import { generateBusSeatGrid } from '@/lib/seat-layout';
 
 interface SeatMapProps {
   tripId: string;
@@ -17,66 +17,78 @@ interface SeatMapProps {
 
 interface SeatButtonProps {
   seatId: string;
+  displayNumber: string;
   seatType: { code: 'W' | 'A' | 'M' | 'VIP' | 'C'; label: string };
   isBooked: boolean;
   isLockedByOther: boolean;
   isSelected: boolean;
   isLockedByMe: boolean;
-  seatSize: string;
   readOnly: boolean;
   onClick: (seatId: string) => void;
 }
 
-// Memoized individual seat button for 60fps rendering without re-rendering unaffected seats
+// Authentic Coach Bus Seat with Left & Right Armrests, Cushion Clip & Bold 2-digit Number
 const SeatButton = memo(function SeatButton({
   seatId,
+  displayNumber,
   seatType,
   isBooked,
   isLockedByOther,
   isSelected,
   isLockedByMe,
-  seatSize,
   readOnly,
   onClick
 }: SeatButtonProps) {
-  let seatStyle = 'bg-white border-slate-300 text-slate-800 hover:border-orange-500 hover:shadow-sm';
+  let cushionBg = 'bg-white border-slate-900';
+  let numColor = 'text-slate-900';
+  let armrestBg = 'bg-white border-slate-900';
+  let pillBg = 'bg-slate-950';
+
   if (isBooked) {
-    seatStyle = 'bg-red-500 border-red-600 text-white font-bold cursor-not-allowed shadow-inner';
+    cushionBg = 'bg-[#dc2626] border-slate-900';
+    numColor = 'text-slate-950';
+    armrestBg = 'bg-white border-slate-900';
+    pillBg = 'bg-slate-950';
   } else if (isLockedByOther) {
-    seatStyle = 'bg-amber-50 border-amber-300 text-amber-700 cursor-not-allowed';
+    cushionBg = 'bg-amber-100 border-amber-500';
+    numColor = 'text-amber-950';
+    armrestBg = 'bg-amber-50 border-amber-500';
+    pillBg = 'bg-amber-900';
   } else if (isSelected || isLockedByMe) {
-    seatStyle = 'bg-orange-600 border-orange-700 text-white shadow-sm ring-2 ring-orange-200';
+    cushionBg = 'bg-[#ea580c] border-slate-900';
+    numColor = 'text-slate-950';
+    armrestBg = 'bg-white border-slate-900';
+    pillBg = 'bg-slate-950';
   }
 
-  return (
-    <button
-      type="button"
-      disabled={readOnly || isBooked || isLockedByOther}
-      onClick={() => onClick(seatId)}
-      className={`${seatSize} relative flex flex-col items-center justify-between py-1.5 px-0.5 border-2 rounded-t-xl rounded-b-md transition-all duration-75 shrink-0 ${seatStyle} ${(!isBooked && !isLockedByOther) ? 'active:scale-95 cursor-pointer' : ''}`}
-      title={`${seatId} • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
-    >
-      {/* Headrest curve top accent */}
-      <div className={`w-6 h-1 rounded-full mb-0.5 ${isSelected || isLockedByMe ? 'bg-orange-400' : isBooked ? 'bg-red-400' : 'bg-slate-200'}`} />
+  const disabled = readOnly || isBooked || isLockedByOther;
 
-      <span className="text-[11px] sm:text-xs font-black tracking-tight leading-none">
-        {seatId}
-      </span>
-      
-      <div className="flex items-center gap-0.5 leading-none">
-        {isSelected ? (
-          <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
-        ) : isBooked ? (
-          <X className="w-3.5 h-3.5 stroke-[3] text-white/90" />
-        ) : (
-          <span className={`text-[8.5px] font-black uppercase ${
-            seatType.code === 'VIP' ? 'text-purple-600' : 'text-slate-400'
-          }`}>
-            {seatType.code}
-          </span>
-        )}
-      </div>
-    </button>
+  return (
+    <div 
+      className="relative inline-flex items-center justify-center p-0.5 select-none shrink-0"
+      title={`${seatId} (${displayNumber}) • ${seatType.label} • ${isBooked ? 'Booked' : isLockedByOther ? 'Reserved (10m)' : isSelected ? 'Selected' : 'Available'}`}
+    >
+      {/* Left Armrest */}
+      <div className={`w-1 sm:w-1.5 h-6.5 sm:h-7.5 border ${armrestBg} rounded-l-sm sm:rounded-l-md shrink-0 shadow-2xs -mr-[1px] z-0`} />
+
+      {/* Main Seat Cushion */}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onClick(seatId)}
+        className={`w-7.5 sm:w-9 h-11 sm:h-12 border ${cushionBg} rounded-t-md sm:rounded-t-lg rounded-b-xs sm:rounded-b-sm flex flex-col items-center justify-between py-1 shrink-0 z-10 transition-all ${!disabled ? 'cursor-pointer hover:brightness-95 active:scale-95' : 'cursor-not-allowed'}`}
+      >
+        <div className="w-full" />
+        <span className={`text-[11px] sm:text-xs font-black tracking-tight leading-none ${numColor}`}>
+          {displayNumber}
+        </span>
+        {/* Bottom cushion detail pill */}
+        <div className={`w-3.5 sm:w-4 h-1 sm:h-1.5 ${pillBg} rounded-xs`} />
+      </button>
+
+      {/* Right Armrest */}
+      <div className={`w-1 sm:w-1.5 h-6.5 sm:h-7.5 border ${armrestBg} rounded-r-sm sm:rounded-r-md shrink-0 shadow-2xs -ml-[1px] z-0`} />
+    </div>
   );
 });
 
@@ -113,6 +125,13 @@ export default function SeatMap({
   useEffect(() => {
     onSeatSelectRef.current = onSeatSelect;
   }, [onSeatSelect]);
+
+  // Synchronize when initialSelectedSeats prop changes externally
+  useEffect(() => {
+    if (initialSelectedSeats) {
+      setSelectedSeats(initialSelectedSeats);
+    }
+  }, [initialSelectedSeats]);
 
   const fetchSeatStatuses = useCallback(async () => {
     if (!tripId) return;
@@ -338,203 +357,135 @@ export default function SeatMap({
     }
   }, [readOnly, effectiveUserId, seatStatuses, selectedSeats, onSeatSelect, tripId, authFetch, fetchSeatStatuses]);
 
-  const rawType = (layout?.type || '').toLowerCase().replace(':', 'x').replace('+', 'x');
-  const is2x3 = rawType === '2x3' || rawType === '3x2' || layout?.cols === 5;
-  const is2x1 = rawType === '2x1' || rawType === '2+1' || (layout?.cols === 3 && layout?.aisleCol === 2);
-  const is2x2 = !is2x3 && !is2x1;
-
-  const totalGridCols = is2x3 ? 6 : is2x2 ? 5 : 4;
-  const aisleColIndex = 2; // Index 2 is the aisle
-
-  const rows = layout?.rows || (is2x3 ? 11 : is2x2 ? 11 : 10);
-  const totalSeats = layout?.totalSeats || (is2x3 ? 54 : is2x2 ? 45 : 30);
-
-  const hasConnectedBackRow = is2x2 && (
-    layout?.backRowType === '5-seater' ||
-    (layout?.backRowType !== '4-seater' && layout?.backRowType !== 'with-aisle' && (totalSeats % 4 === 1))
-  );
-
-  const getSeatPosition = (c: number, isLastRow: boolean): { code: 'W' | 'A' | 'M' | 'VIP' | 'C'; label: string } => {
-    if (isLastRow && hasConnectedBackRow && c === aisleColIndex) {
-      return { code: 'C', label: 'Rear Center Seat' };
-    }
-
-    if (is2x3) {
-      if (c === 0) return { code: 'W', label: 'Left Window Seat' };
-      if (c === 1) return { code: 'A', label: 'Left Aisle Seat' };
-      if (c === 3) return { code: 'A', label: 'Right Aisle Seat' };
-      if (c === 4) return { code: 'M', label: 'Right Middle Seat' };
-      if (c === 5) return { code: 'W', label: 'Right Window Seat' };
-    } else if (is2x2) {
-      if (c === 0) return { code: 'W', label: 'Left Window Seat' };
-      if (c === 1) return { code: 'A', label: 'Left Aisle Seat' };
-      if (c === 3) return { code: 'A', label: 'Right Aisle Seat' };
-      if (c === 4) return { code: 'W', label: 'Right Window Seat' };
-    } else if (is2x1) {
-      if (c === 0) return { code: 'W', label: 'Left Window Seat' };
-      if (c === 1) return { code: 'A', label: 'Left Aisle Seat' };
-      if (c === 3) return { code: 'VIP', label: 'Single Window Seat' };
-    }
-
-    return { code: 'W', label: 'Window Seat' };
-  };
+  // Generate authoritative bus seating topology matching real Sri Lankan buses
+  const { layoutType, grid } = useMemo(() => {
+    return generateBusSeatGrid(
+      layout?.type,
+      layout?.totalSeats,
+      layout?.backRowType
+    );
+  }, [layout]);
 
   const renderGrid = () => {
-    const grid = [];
-    let seatNumber = 1;
     const now = Date.now();
 
-    for (let r = 0; r < rows; r++) {
-      const row = [];
-      const isLastRow = (r === rows - 1);
-
-      for (let c = 0; c < totalGridCols; c++) {
-        const isCenterBackSeat = isLastRow && hasConnectedBackRow && c === aisleColIndex && seatNumber <= totalSeats;
-
-        if (c === aisleColIndex && !isCenterBackSeat) {
-          row.push(
-            <div 
-              key={`aisle-${r}`} 
-              className={`${is2x3 ? 'w-5 sm:w-6' : is2x1 ? 'w-8 sm:w-10' : 'w-6 sm:w-8'} flex items-center justify-center shrink-0`}
-              title="Walkway Aisle"
-            >
-              <div className="h-full w-px border-r border-dashed border-slate-300/80"></div>
-            </div>
-          );
-        } else {
-          if (seatNumber > totalSeats) {
-            const emptySize = is2x3 
-              ? 'w-10 sm:w-11 h-13 sm:h-14' 
-              : is2x1 
-              ? 'w-13 sm:w-14 h-14 sm:h-15' 
-              : 'w-11 sm:w-12 h-14 sm:h-15';
-            row.push(
+    return grid.map((rowCells, r) => (
+      <div key={`row-${r}`} className="flex gap-1 sm:gap-1.5 mb-1 sm:mb-1.5 items-center justify-center">
+        {rowCells.map((cell, c) => {
+          if (cell.type === 'aisle') {
+            return (
               <div 
-                key={`empty-${r}-${c}`} 
-                className={`${emptySize} opacity-0 pointer-events-none shrink-0`}
-              />
+                key={`aisle-${r}-${c}`} 
+                className={`${layoutType === '2x3' ? 'w-4 sm:w-5' : layoutType === '2+1' ? 'w-6 sm:w-8' : 'w-5 sm:w-6'} flex items-center justify-center shrink-0`}
+                title="Walkway Aisle"
+              >
+                <div className="h-full w-px border-r border-dashed border-slate-300"></div>
+              </div>
             );
-            continue;
           }
 
-          const seatId = `S${seatNumber}`;
-          seatNumber++;
-          
-          const seatType = getSeatPosition(c, isLastRow);
-          const statusInfo = seatStatuses[seatId];
+          if (cell.type === 'empty') {
+            return (
+              <div 
+                key={`empty-${r}-${c}`} 
+                className="w-8.5 sm:w-10.5 h-11 sm:h-12 shrink-0 opacity-0 pointer-events-none" 
+              />
+            );
+          }
+
+          // Seat Cell
+          const seatId = cell.seatId || `S${cell.seatNumber}`;
+          const displayNumber = cell.displayNumber || String(cell.seatNumber).padStart(2, '0');
+          const seatType = {
+            code: cell.seatCode || 'W',
+            label: cell.label || 'Passenger Seat'
+          };
+
+          const statusInfo = seatStatuses[seatId] || seatStatuses[displayNumber] || seatStatuses[String(cell.seatNumber)];
           const isBooked = statusInfo?.status === 'booked';
           const isLockedByMe = statusInfo?.status === 'locked' && Boolean(statusInfo.isMine || statusInfo.userId === effectiveUserId);
           const isLockedByOther = statusInfo?.status === 'locked' && !statusInfo.isMine && statusInfo.userId !== effectiveUserId && Boolean(statusInfo.expiresAt && statusInfo.expiresAt > now);
-          const isSelected = selectedSeats.includes(seatId);
+          const isSelected = selectedSeats.includes(seatId) || selectedSeats.includes(displayNumber);
 
-          const seatSize = is2x3 
-            ? 'w-10 sm:w-11 h-13 sm:h-14' 
-            : is2x1 
-            ? 'w-13 sm:w-14 h-14 sm:h-15' 
-            : 'w-11 sm:w-12 h-14 sm:h-15';
-
-          row.push(
+          return (
             <SeatButton
               key={seatId}
               seatId={seatId}
+              displayNumber={displayNumber}
               seatType={seatType}
               isBooked={isBooked}
               isLockedByOther={isLockedByOther}
               isSelected={isSelected}
               isLockedByMe={isLockedByMe}
-              seatSize={seatSize}
               readOnly={readOnly}
               onClick={handleSeatClick}
             />
           );
-        }
-      }
-      grid.push(
-        <div key={`row-${r}`} className="flex gap-2 mb-2 items-center justify-center">
-          {row}
-        </div>
-      );
-    }
-    return grid;
+        })}
+      </div>
+    ));
   };
 
   return (
-    <div className="flex flex-col items-center p-4 sm:p-6 bg-slate-50 border border-slate-200 rounded-3xl shadow-inner max-w-xl mx-auto">
+    <div className="flex flex-col items-center p-3 sm:p-6 bg-slate-50 border border-slate-200 rounded-3xl shadow-inner max-w-lg mx-auto w-full">
       
       {/* Sri Lanka Bus Layout Type Pill */}
-      <div className="mb-5 text-center">
+      <div className="mb-4 text-center">
         <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold shadow-xs bg-white border border-slate-200 text-slate-800">
           <span className="w-2 h-2 rounded-full bg-orange-600"></span>
-          {is2x3 ? '2x3 Normal Bus (2 Left + Aisle + 3 Right)' : is2x1 ? '2+1 VIP Sleeper Bus (2 Left + Aisle + 1 Single)' : '2x2 Luxury Express (2 Left + Aisle + 2 Right)'}
+          {layoutType === '2x3' 
+            ? '2x3 Normal Bus (2 Left + Aisle + 3 Right)' 
+            : layoutType === '2+1' 
+            ? '2+1 VIP Sleeper (2 Left + Aisle + 1 Single)' 
+            : '2x2 Luxury Express (2 Left + Aisle + 2 Right)'}
         </span>
       </div>
 
-      {/* Realistic Curved Front Coach Windshield */}
-      <div className="w-full max-w-sm mb-4">
-        <div className="h-4 bg-slate-300 rounded-t-3xl border-t-2 border-x-2 border-slate-400/80 mx-2 shadow-xs flex items-center justify-center">
-          <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Front Windshield</span>
-        </div>
+      {/* Front Header with clean divider line matching user screenshot */}
+      <div className="w-full max-w-xs sm:max-w-sm flex flex-col items-center mb-4">
+        <span className="text-xs sm:text-sm font-black text-slate-700 tracking-wider mb-1.5 uppercase">
+          Front
+        </span>
+        <div className="w-full h-1 bg-slate-400 rounded-full" />
       </div>
 
-      {/* Driver Cabin (Right in Sri Lanka RHD) & Passenger Door (Left) */}
-      <div className="w-full max-w-sm border-b-2 border-slate-300 pb-3 mb-5 flex justify-between items-center px-4">
-        
-        {/* Entrance Door (Left) */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl border border-slate-300 flex items-center justify-center text-slate-600 font-bold text-xs bg-white shadow-2xs">
-            🚪
-          </div>
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Passenger Entry</span>
-        </div>
-
-        {/* Driver Cabin (Right - Sri Lanka RHD) */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Driver Cabin</span>
-          <div className="w-8 h-8 rounded-xl border border-slate-300 flex items-center justify-center text-slate-600 font-bold text-xs bg-white shadow-2xs" title="Driver Wheel">
-            💺
-          </div>
-        </div>
-      </div>
-      
       {/* Bus Seats Grid Container */}
-      <div className="flex flex-col gap-1 overflow-x-auto max-w-full pb-3 px-2">
+      <div className="flex flex-col gap-0.5 overflow-x-auto max-w-full pb-2 px-1">
         {renderGrid()}
       </div>
 
       {/* Rear Coach Marker */}
-      <div className="w-full max-w-sm text-center pt-3 mt-1 border-t-2 border-slate-300 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-        REAR OF BUS
+      <div className="w-full max-w-xs sm:max-w-sm text-center pt-3 mt-1 border-t border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+        Rear of Bus
       </div>
 
-      {/* Seat State Legend */}
-      <div className="flex flex-wrap gap-4 mt-6 pt-4 border-t border-slate-200 w-full justify-center text-xs font-semibold text-slate-700">
+      {/* Seat State Legend matching authentic bus booking interface */}
+      <div className="flex flex-wrap gap-3 sm:gap-4 mt-5 pt-3 border-t border-slate-200 w-full justify-center text-xs font-semibold text-slate-700">
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-white border-2 border-slate-300 rounded-sm"></div> 
+          <div className="w-4 h-4 bg-white border border-slate-900 rounded-sm"></div> 
           <span>Available</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-orange-600 border-2 border-orange-700 rounded-sm"></div> 
+          <div className="w-4 h-4 bg-[#ea580c] border border-slate-900 rounded-sm"></div> 
           <span>Selected</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-amber-50 border-2 border-amber-300 rounded-sm"></div> 
-          <span>Reserved (10m)</span>
+          <div className="w-4 h-4 bg-[#dc2626] border border-slate-900 rounded-sm"></div> 
+          <span>Booked</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-red-500 border-2 border-red-600 rounded-sm flex items-center justify-center">
-            <X className="w-2.5 h-2.5 stroke-[3] text-white" />
-          </div> 
-          <span>Booked</span>
+          <div className="w-4 h-4 bg-amber-100 border border-amber-500 rounded-sm"></div> 
+          <span>Reserved (10m)</span>
         </div>
       </div>
 
       {/* Seat Position Keys */}
-      <div className="flex flex-wrap items-center gap-3 sm:gap-4 mt-2.5 text-[11px] text-slate-500 font-medium justify-center">
+      <div className="flex flex-wrap items-center gap-3 mt-2 text-[11px] text-slate-500 font-medium justify-center">
         <span><strong className="text-slate-700 font-bold">W:</strong> Window</span>
         <span><strong className="text-slate-700 font-bold">A:</strong> Aisle</span>
-        {is2x3 && <span><strong className="text-slate-700 font-bold">M:</strong> Middle</span>}
-        {is2x1 && <span><strong className="text-purple-700 font-bold">VIP:</strong> Single Sleeper</span>}
-        {hasConnectedBackRow && <span><strong className="text-slate-700 font-bold">C:</strong> Rear Center</span>}
+        {layoutType === '2x3' && <span><strong className="text-slate-700 font-bold">M:</strong> Middle</span>}
+        {layoutType === '2+1' && <span><strong className="text-purple-700 font-bold">VIP:</strong> Single Sleeper</span>}
+        <span><strong className="text-slate-700 font-bold">C:</strong> Rear Bench</span>
       </div>
     </div>
   );

@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, HttpError } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { linkAccountSchema, formatZodError } from '@/lib/validation/schemas';
 import { linkGuestBookingToAccount } from '@/lib/services/booking-service';
 
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    await enforceRateLimit(req, 'link_account', 10, 60);
+    await enforceSharedRateLimit(req, 'link_account', 10, 60);
 
     // 2. Server-verified Authentication (immune to client-supplied userId spoofing)
     const authenticatedUser = await requireAuth(req);

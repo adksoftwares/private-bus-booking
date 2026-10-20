@@ -7,7 +7,7 @@ import { Json } from '@/types/database';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ busId: string }> }) {
   try {
-    enforceRateLimit(req, 'update_bus', 30, 60);
+    await enforceRateLimit(req, 'update_bus', 30, 60);
     const { busId } = await params;
     const authenticatedUser = await requireOwner(req);
 

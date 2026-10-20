@@ -21,7 +21,7 @@ export function invalidateTripSeatsCache(tripId?: string) {
 
 export async function GET(req: Request) {
   try {
-    enforceRateLimit(req, 'seat_status', 60, 60);
+    await enforceRateLimit(req, 'seat_status', 60, 60);
 
     const { searchParams } = new URL(req.url);
     const tripId = searchParams.get('tripId');

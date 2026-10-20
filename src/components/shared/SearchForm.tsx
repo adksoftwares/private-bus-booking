@@ -14,13 +14,15 @@ export default function SearchForm() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
-  // Format today's and tomorrow's date for quick date chips (YYYY-MM-DD)
+  // Use the user's local calendar date, not UTC (Sri Lanka is UTC+05:30).
+  const toLocalDateString = (value: Date) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-  
-  const tomorrow = new Date();
+  const todayStr = toLocalDateString(today);
+
+  const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+  const tomorrowStr = toLocalDateString(tomorrow);
 
   const [date, setDate] = useState(todayStr);
 
@@ -103,12 +105,18 @@ export default function SearchForm() {
           
           {/* Origin (From) Field */}
           <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <label htmlFor="search-origin" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('from')}</span>
             </label>
             <input 
+              id="search-origin"
               type="text" 
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showFrom && fromSuggestions.length > 0}
+              aria-controls="search-origin-options"
+              autoComplete="off"
               required 
               placeholder="e.g. Colombo (Bastian Mwt)"
               className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent placeholder-slate-400"
@@ -123,8 +131,8 @@ export default function SearchForm() {
             
             {/* Auto-suggest dropdown */}
             {showFrom && fromSuggestions.length > 0 && (
-              <ul className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
-                <li className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+                <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Origin Station / Stand
                 </li>
                 {fromSuggestions.map(stand => (
@@ -170,12 +178,18 @@ export default function SearchForm() {
 
           {/* Destination (To) Field */}
           <div className="flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <label htmlFor="search-destination" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <Navigation className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('to')}</span>
             </label>
             <input 
+              id="search-destination"
               type="text" 
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showTo && toSuggestions.length > 0}
+              aria-controls="search-destination-options"
+              autoComplete="off"
               required 
               placeholder="e.g. Kandy, Jaffna, Galle"
               className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent placeholder-slate-400"
@@ -190,8 +204,8 @@ export default function SearchForm() {
 
             {/* Auto-suggest dropdown */}
             {showTo && toSuggestions.length > 0 && (
-              <ul className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
-                <li className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+              <ul id="search-destination-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+                <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Destination Station / Stand
                 </li>
                 {toSuggestions.map(stand => (

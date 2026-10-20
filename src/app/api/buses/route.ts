@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireOwner } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { createBusSchema, formatZodError } from '@/lib/validation/schemas';
 import { Bus } from '@/types/bus';
 import { Json } from '@/types/database';
@@ -63,7 +63,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting & Server authentication
-    enforceRateLimit(req, 'create_bus', 15, 60);
+    await enforceSharedRateLimit(req, 'create_bus', 15, 60);
     const authenticatedUser = await requireOwner(req);
 
     // 2. Strict Zod payload validation

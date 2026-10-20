@@ -8,6 +8,7 @@ A multilingual bus-booking web application built with Next.js, React, TypeScript
 - npm
 - A Supabase project configured for this application
 - Environment variables configured locally and in the deployment platform
+- Upstash Redis REST credentials for production-wide rate limiting
 
 ## Local development
 
@@ -35,6 +36,16 @@ A multilingual bus-booking web application built with Next.js, React, TypeScript
 - `npm test` — run the concurrency/security test script at `scripts/test-concurrency-and-security.ts`
 
 A script existing in the repository does not mean it has passed. Run the checks locally and in CI before deploying.
+
+## Rate limiting configuration
+
+Non-PayHere API rate limits use shared, atomic counters through Upstash Redis. Existing PayHere route code is intentionally left unchanged and still uses the legacy process-local limiter. Configure these server-only environment variables locally and in the deployment platform:
+
+- `UPSTASH_REDIS_REST_URL` — Upstash Redis REST endpoint
+- `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis REST token
+- `TRUST_PROXY_HEADERS=true` — optional; enable only if the hosting proxy reliably overwrites `X-Forwarded-For`. The app prefers `X-Real-IP` when available.
+
+For handlers using the shared limiter, production requests fail closed with HTTP 503 if Redis is missing or unavailable. The process-local fallback is for development only. Existing PayHere handlers are excluded by design in this change and need a separate review before claiming all endpoints have distributed rate limiting. Never expose the Redis token to client-side code.
 
 ## Application areas
 

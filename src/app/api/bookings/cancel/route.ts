@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, HttpError } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { cancelBookingSchema } from '@/lib/validation/schemas';
 import { cancelBooking } from '@/lib/services/booking-service';
 
 export async function POST(req: Request) {
   try {
     // 1. Abuse & Brute-Force Rate Limiting
-    enforceRateLimit(req, 'cancel-booking', 15, 60);
+    await enforceSharedRateLimit(req, 'cancel-booking', 15, 60);
 
     const body = await req.json();
     const { bookingId, accessToken } = cancelBookingSchema.parse(body);

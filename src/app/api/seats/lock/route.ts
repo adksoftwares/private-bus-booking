@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { atomicLockSeats } from '@/lib/services/booking-service';
 import { getAuthenticatedUser } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 
 export async function POST(req: Request) {
   try {
-    enforceRateLimit(req, 'seat-lock', 60, 60);
+    await enforceSharedRateLimit(req, 'seat-lock', 60, 60);
 
     const body = await req.json();
     const { tripId, seatId, seatIds, guestSessionId } = body;

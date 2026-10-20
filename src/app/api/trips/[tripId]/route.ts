@@ -1,44 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireTripOwnership } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { updateTripSchema, formatZodError } from '@/lib/validation/schemas';
 import { Database, Json } from '@/types/database';
 
-// High-performance server-side in-memory cache for trips
-interface CachedTripEntry {
-  trip: any;
-  cachedAt: number;
-}
-const tripMemoryCache = new Map<string, CachedTripEntry>();
-const TRIP_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
-
-export function invalidateTripCache(tripId?: string) {
-  if (tripId) {
-    tripMemoryCache.delete(tripId);
-  } else {
-    tripMemoryCache.clear();
-  }
-}
-
+// Avoid process-global and shared public caching for trip data that includes owner metadata.
 export async function GET(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
     const { tripId } = await params;
-    
-    // Check in-memory cache first (sub-millisecond response)
-    const cached = tripMemoryCache.get(tripId);
-    const now = Date.now();
-    if (cached && (now - cached.cachedAt) < TRIP_CACHE_TTL_MS) {
-      return NextResponse.json({ trip: cached.trip }, {
-        headers: {
-          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
-          'X-Cache': 'HIT'
-        }
-      });
-    }
-
     const supabase = getAuthenticatedRequestClient(req);
-
     const { data: trip, error } = await supabase
       .from('trips')
       .select('*')
@@ -46,7 +17,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ tripId: 
       .maybeSingle();
 
     if (error || !trip) {
-      return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Trip not found' },
+        { status: 404, headers: { 'Cache-Control': 'private, no-store' } }
+      );
     }
 
     const formattedTrip = {
@@ -66,27 +40,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ tripId: 
       status: trip.status
     };
 
-    // Store in memory cache
-    tripMemoryCache.set(tripId, {
-      trip: formattedTrip,
-      cachedAt: now
-    });
-
-    return NextResponse.json({ trip: formattedTrip }, {
-      headers: {
-        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
-        'X-Cache': 'MISS'
-      }
-    });
+    return NextResponse.json(
+      { trip: formattedTrip },
+      { headers: { 'Cache-Control': 'private, no-store' } }
+    );
   } catch (err: unknown) {
-    console.error("GET /api/trips/[tripId] error:", err);
-    return NextResponse.json({ error: 'Failed to fetch trip' }, { status: 500 });
+    console.error('GET /api/trips/[tripId] error:', err);
+    return NextResponse.json(
+      { error: 'Failed to fetch trip' },
+      { status: 500, headers: { 'Cache-Control': 'private, no-store' } }
+    );
   }
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
-    enforceRateLimit(req, 'update_trip', 30, 60);
+    await enforceSharedRateLimit(req, 'update_trip', 30, 60);
     const { tripId } = await params;
 
     // 1. Authoritative Server Ownership Check (Caller must be Admin or the Trip's verified Owner)
@@ -136,9 +105,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ tripId
       console.error("Failed to update trip:", updateError);
       return NextResponse.json({ error: 'Failed to update trip' }, { status: 500 });
     }
-
-    // Invalidate server memory cache immediately
-    invalidateTripCache(tripId);
 
     // 3. Audit Log
     try {

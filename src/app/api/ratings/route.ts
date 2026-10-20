@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { submitBusRatingSchema, formatZodError } from '@/lib/validation/schemas';
 import { Json } from '@/types/database';
 
@@ -74,7 +74,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    enforceRateLimit(req, 'submit_rating', 10, 60);
+    await enforceSharedRateLimit(req, 'submit_rating', 10, 60);
 
     // 2. Validate request payload
     const body = await req.json();

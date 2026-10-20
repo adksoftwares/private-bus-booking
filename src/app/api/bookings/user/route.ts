@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireAuth } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { Booking } from '@/types/booking';
 
 export async function GET(req: Request) {
   try {
-    enforceRateLimit(req, 'user_bookings', 30, 60);
+    await enforceSharedRateLimit(req, 'user_bookings', 30, 60);
     const user = await requireAuth(req);
     const supabase = getSupabaseAdminClient();
 

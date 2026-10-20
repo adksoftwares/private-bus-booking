@@ -148,6 +148,7 @@ export default function SearchForm() {
               aria-autocomplete="list"
               aria-expanded={showFrom && fromSuggestions.length > 0}
               aria-controls="search-origin-options"
+              aria-activedescendant={highlightedFromIndex >= 0 ? `search-origin-option-${fromSuggestions[highlightedFromIndex]?.id}` : undefined}
               autoComplete="off"
               required 
               placeholder="e.g. Colombo (Bastian Mwt)"
@@ -169,9 +170,12 @@ export default function SearchForm() {
                 </li>
                 {fromSuggestions.map(stand => (
                   <li 
-                    key={stand.id} 
-                    className="px-3.5 py-2.5 hover:bg-orange-50 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2"
-                    onMouseDown={() => { setFrom(stand.name); setShowFrom(false); }}
+                    key={stand.id}
+                    id={`search-origin-option-${stand.id}`}
+                    role="option"
+                    aria-selected={highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id)}
+                    className={`px-3.5 py-2.5 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2 ${highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    onMouseDown={() => { setFrom(stand.name); setShowFrom(false); setHighlightedFromIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
                       <MapPin className={`w-4 h-4 mt-0.5 shrink-0 ${stand.isMajorHub ? 'text-orange-600' : 'text-slate-400'}`} />
@@ -222,6 +226,7 @@ export default function SearchForm() {
               aria-autocomplete="list"
               aria-expanded={showTo && toSuggestions.length > 0}
               aria-controls="search-destination-options"
+              aria-activedescendant={highlightedToIndex >= 0 ? `search-destination-option-${toSuggestions[highlightedToIndex]?.id}` : undefined}
               autoComplete="off"
               required 
               placeholder="e.g. Kandy, Jaffna, Galle"
@@ -243,9 +248,12 @@ export default function SearchForm() {
                 </li>
                 {toSuggestions.map(stand => (
                   <li 
-                    key={stand.id} 
-                    className="px-3.5 py-2.5 hover:bg-orange-50 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2"
-                    onMouseDown={() => { setTo(stand.name); setShowTo(false); }}
+                    key={stand.id}
+                    id={`search-destination-option-${stand.id}`}
+                    role="option"
+                    aria-selected={highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id)}
+                    className={`px-3.5 py-2.5 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2 ${highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    onMouseDown={() => { setTo(stand.name); setShowTo(false); setHighlightedToIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
                       <Navigation className={`w-4 h-4 mt-0.5 shrink-0 ${stand.isMajorHub ? 'text-orange-600' : 'text-slate-400'}`} />

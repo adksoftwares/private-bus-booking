@@ -289,7 +289,7 @@ export default function SearchForm() {
                   type="button"
                   onClick={() => setDate(todayStr)}
                   disabled={!todayStr}
-                  aria-pressed={date === todayStr}
+                  aria-pressed={(date || todayStr) === todayStr}
                   className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${(date || todayStr) === todayStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Today

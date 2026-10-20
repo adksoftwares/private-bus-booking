@@ -1,11 +1,20 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useRouter } from '@/i18n/routing';
 import { MapPin, Navigation, Calendar, ArrowLeftRight, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { BusStand } from '@/types/location';
 import { searchBusStands, MAJOR_TRANSPORT_HUBS } from '@/data/sriLankaBusStands';
+
+
+const subscribeToNoChanges = () => () => {};
+const getServerDateSnapshot = () => '';
+const getLocalDateString = (daysFromToday: number) => {
+  const value = new Date();
+  value.setDate(value.getDate() + daysFromToday);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+};
 
 export default function SearchForm() {
   const router = useRouter();
@@ -14,20 +23,18 @@ export default function SearchForm() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
-  // Format today's and tomorrow's date for quick date chips (YYYY-MM-DD)
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-  
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+  // Hydration-safe local dates: the server snapshot is empty; the browser supplies local calendar dates.
+  const todayStr = useSyncExternalStore(subscribeToNoChanges, () => getLocalDateString(0), getServerDateSnapshot);
+  const tomorrowStr = useSyncExternalStore(subscribeToNoChanges, () => getLocalDateString(1), getServerDateSnapshot);
 
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState('');
 
   const [fromSuggestions, setFromSuggestions] = useState<BusStand[]>([]);
   const [toSuggestions, setToSuggestions] = useState<BusStand[]>([]);
   const [showFrom, setShowFrom] = useState(false);
   const [showTo, setShowTo] = useState(false);
+  const [highlightedFromIndex, setHighlightedFromIndex] = useState(-1);
+  const [highlightedToIndex, setHighlightedToIndex] = useState(-1);
   const [validationError, setValidationError] = useState('');
 
   const handleSearch = (e: React.FormEvent) => {
@@ -49,12 +56,13 @@ export default function SearchForm() {
       setValidationError("Origin and destination cities cannot be the same.");
       return;
     }
-    if (!date) {
+    const travelDate = date || todayStr;
+    if (!travelDate) {
       setValidationError("Please select your travel date.");
       return;
     }
 
-    router.push(`/search?from=${encodeURIComponent(cleanFrom.toLowerCase())}&to=${encodeURIComponent(cleanTo.toLowerCase())}&date=${encodeURIComponent(date)}`);
+    router.push(`/search?from=${encodeURIComponent(cleanFrom.toLowerCase())}&to=${encodeURIComponent(cleanTo.toLowerCase())}&date=${encodeURIComponent(travelDate)}`);
   };
 
   const handleSwap = () => {
@@ -67,6 +75,7 @@ export default function SearchForm() {
 
   const handleFromChange = (val: string) => {
     setFrom(val);
+    setHighlightedFromIndex(-1);
     if (val.trim().length > 0) {
       setFromSuggestions(searchBusStands(val, 12));
       setShowFrom(true);
@@ -78,6 +87,7 @@ export default function SearchForm() {
 
   const handleToChange = (val: string) => {
     setTo(val);
+    setHighlightedToIndex(-1);
     if (val.trim().length > 0) {
       setToSuggestions(searchBusStands(val, 12));
       setShowTo(true);
@@ -87,6 +97,28 @@ export default function SearchForm() {
     }
   };
 
+  const handleLocationKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, field: 'from' | 'to') => {
+    const suggestions = field === 'from' ? fromSuggestions : toSuggestions;
+    const isOpen = field === 'from' ? showFrom : showTo;
+    const index = field === 'from' ? highlightedFromIndex : highlightedToIndex;
+    const setIndex = field === 'from' ? setHighlightedFromIndex : setHighlightedToIndex;
+    if (event.key === 'Escape') {
+      if (isOpen) { event.preventDefault(); if (field === 'from') setShowFrom(false); else setShowTo(false); }
+      return;
+    }
+    if (!isOpen || suggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault(); setIndex(current => current >= suggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault(); setIndex(current => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === 'Enter' && index >= 0) {
+      event.preventDefault();
+      const selected = suggestions[index];
+      if (field === 'from') { setFrom(selected.name); setShowFrom(false); }
+      else { setTo(selected.name); setShowTo(false); }
+      setIndex(-1);
+    }
+  };
   return (
     <div className="w-full">
       {validationError && (
@@ -103,12 +135,20 @@ export default function SearchForm() {
           
           {/* Origin (From) Field */}
           <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <label htmlFor="search-origin" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('from')}</span>
             </label>
             <input 
+              id="search-origin"
               type="text" 
+              onKeyDown={e => handleLocationKeyDown(e, 'from')}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showFrom && fromSuggestions.length > 0}
+              aria-controls="search-origin-options"
+              aria-activedescendant={highlightedFromIndex >= 0 ? `search-origin-option-${fromSuggestions[highlightedFromIndex]?.id}` : undefined}
+              autoComplete="off"
               required 
               placeholder="e.g. Colombo (Bastian Mwt)"
               className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent placeholder-slate-400"
@@ -123,15 +163,18 @@ export default function SearchForm() {
             
             {/* Auto-suggest dropdown */}
             {showFrom && fromSuggestions.length > 0 && (
-              <ul className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
-                <li className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+                <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Origin Station / Stand
                 </li>
                 {fromSuggestions.map(stand => (
                   <li 
-                    key={stand.id} 
-                    className="px-3.5 py-2.5 hover:bg-orange-50 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2"
-                    onMouseDown={() => { setFrom(stand.name); setShowFrom(false); }}
+                    key={stand.id}
+                    id={`search-origin-option-${stand.id}`}
+                    role="option"
+                    aria-selected={highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id)}
+                    className={`px-3.5 py-2.5 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2 ${highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    onMouseDown={() => { setFrom(stand.name); setShowFrom(false); setHighlightedFromIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
                       <MapPin className={`w-4 h-4 mt-0.5 shrink-0 ${stand.isMajorHub ? 'text-orange-600' : 'text-slate-400'}`} />
@@ -170,12 +213,20 @@ export default function SearchForm() {
 
           {/* Destination (To) Field */}
           <div className="flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <label htmlFor="search-destination" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <Navigation className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('to')}</span>
             </label>
             <input 
+              id="search-destination"
               type="text" 
+              onKeyDown={e => handleLocationKeyDown(e, 'to')}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showTo && toSuggestions.length > 0}
+              aria-controls="search-destination-options"
+              aria-activedescendant={highlightedToIndex >= 0 ? `search-destination-option-${toSuggestions[highlightedToIndex]?.id}` : undefined}
+              autoComplete="off"
               required 
               placeholder="e.g. Kandy, Jaffna, Galle"
               className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent placeholder-slate-400"
@@ -190,15 +241,18 @@ export default function SearchForm() {
 
             {/* Auto-suggest dropdown */}
             {showTo && toSuggestions.length > 0 && (
-              <ul className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
-                <li className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+              <ul id="search-destination-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+                <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Destination Station / Stand
                 </li>
                 {toSuggestions.map(stand => (
                   <li 
-                    key={stand.id} 
-                    className="px-3.5 py-2.5 hover:bg-orange-50 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2"
-                    onMouseDown={() => { setTo(stand.name); setShowTo(false); }}
+                    key={stand.id}
+                    id={`search-destination-option-${stand.id}`}
+                    role="option"
+                    aria-selected={highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id)}
+                    className={`px-3.5 py-2.5 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2 ${highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    onMouseDown={() => { setTo(stand.name); setShowTo(false); setHighlightedToIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
                       <Navigation className={`w-4 h-4 mt-0.5 shrink-0 ${stand.isMajorHub ? 'text-orange-600' : 'text-slate-400'}`} />
@@ -234,14 +288,18 @@ export default function SearchForm() {
                 <button
                   type="button"
                   onClick={() => setDate(todayStr)}
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${date === todayStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                  disabled={!todayStr}
+                  aria-pressed={(date || todayStr) === todayStr}
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${(date || todayStr) === todayStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Today
                 </button>
                 <button
                   type="button"
                   onClick={() => setDate(tomorrowStr)}
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${date === tomorrowStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                  disabled={!tomorrowStr}
+                  aria-pressed={date === tomorrowStr}
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${(date || todayStr) === tomorrowStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Tomorrow
                 </button>
@@ -252,7 +310,7 @@ export default function SearchForm() {
               required 
               min={todayStr}
               className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent cursor-pointer"
-              value={date} 
+              value={date || todayStr} 
               onChange={e => setDate(e.target.value)}
             />
           </div>

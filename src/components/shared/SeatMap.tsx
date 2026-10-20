@@ -45,8 +45,8 @@ const SeatButton = memo(function SeatButton({
   let pillBg = 'bg-slate-950';
 
   if (isBooked) {
-    cushionBg = 'bg-[#dc2626] border-slate-900';
-    numColor = 'text-slate-950';
+    cushionBg = 'bg-red-700 border-slate-900';
+    numColor = 'text-white';
     armrestBg = 'bg-white border-slate-900';
     pillBg = 'bg-slate-950';
   } else if (isLockedByOther) {
@@ -55,8 +55,8 @@ const SeatButton = memo(function SeatButton({
     armrestBg = 'bg-amber-50 border-amber-500';
     pillBg = 'bg-amber-900';
   } else if (isSelected || isLockedByMe) {
-    cushionBg = 'bg-[#ea580c] border-slate-900';
-    numColor = 'text-slate-950';
+    cushionBg = 'bg-orange-600 border-slate-900';
+    numColor = 'text-white';
     armrestBg = 'bg-white border-slate-900';
     pillBg = 'bg-slate-950';
   }
@@ -76,7 +76,9 @@ const SeatButton = memo(function SeatButton({
         type="button"
         disabled={disabled}
         onClick={() => onClick(seatId)}
-        className={`w-7.5 sm:w-9 h-11 sm:h-12 border ${cushionBg} rounded-t-md sm:rounded-t-lg rounded-b-xs sm:rounded-b-sm flex flex-col items-center justify-between py-1 shrink-0 z-10 transition-all ${!disabled ? 'cursor-pointer hover:brightness-95 active:scale-95' : 'cursor-not-allowed'}`}
+        aria-label={`Seat ${displayNumber}, ${seatType.label}, ${isBooked ? 'booked' : isLockedByOther ? 'reserved by another passenger' : isSelected || isLockedByMe ? 'selected' : 'available'}`}
+        aria-pressed={isSelected || isLockedByMe}
+        className={`w-7.5 sm:w-9 h-11 sm:h-12 border ${cushionBg} rounded-t-md sm:rounded-t-lg rounded-b-xs sm:rounded-b-sm flex flex-col items-center justify-between py-1 shrink-0 z-10 transition-colors duration-150 ${!disabled ? 'cursor-pointer hover:brightness-95 active:scale-95' : 'cursor-not-allowed'}`}
       >
         <div className="w-full" />
         <span className={`text-[11px] sm:text-xs font-black tracking-tight leading-none ${numColor}`}>
@@ -466,11 +468,11 @@ export default function SeatMap({
           <span>Available</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-[#ea580c] border border-slate-900 rounded-sm"></div> 
+          <div className="w-4 h-4 bg-orange-600 border border-slate-900 rounded-sm"></div> 
           <span>Selected</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 bg-[#dc2626] border border-slate-900 rounded-sm"></div> 
+          <div className="w-4 h-4 bg-red-700 border border-slate-900 rounded-sm"></div> 
           <span>Booked</span>
         </div>
         <div className="flex items-center gap-1.5">

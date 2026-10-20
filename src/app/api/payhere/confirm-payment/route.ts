@@ -8,7 +8,7 @@ import { Json } from '@/types/database';
 
 export async function POST(req: Request) {
   try {
-    enforceRateLimit(req, 'confirm_payment', 30, 60);
+    await enforceRateLimit(req, 'confirm_payment', 30, 60);
 
     const body = await req.json();
     const { orderId, accessToken } = body;

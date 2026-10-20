@@ -8,7 +8,7 @@ import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 export async function POST(req: Request) {
   try {
     // 1. Abuse & Brute-Force Rate Limiting
-    enforceRateLimit(req, 'create-pending', 20, 60);
+    await enforceRateLimit(req, 'create-pending', 20, 60);
 
     // 2. Validate input schema
     const body = await req.json();

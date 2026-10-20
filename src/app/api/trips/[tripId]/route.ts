@@ -86,7 +86,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ tripId: 
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
-    enforceRateLimit(req, 'update_trip', 30, 60);
+    await enforceRateLimit(req, 'update_trip', 30, 60);
     const { tripId } = await params;
 
     // 1. Authoritative Server Ownership Check (Caller must be Admin or the Trip's verified Owner)

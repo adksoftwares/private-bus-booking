@@ -325,7 +325,9 @@ export default function Header() {
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="md:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
-            aria-label="Toggle Navigation Menu"
+            aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="lankabus-mobile-navigation"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -334,7 +336,7 @@ export default function Header() {
 
       {/* Mobile Drawer Menu */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-200 bg-white px-4 py-4 space-y-3 shadow-lg">
+        <div id="lankabus-mobile-navigation" className="md:hidden border-t border-slate-200 bg-white px-4 py-4 space-y-3 shadow-lg">
           <nav className="flex flex-col gap-1 text-sm font-bold text-slate-700">
             <Link 
               href="/" 

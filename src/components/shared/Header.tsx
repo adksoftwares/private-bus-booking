@@ -151,7 +151,7 @@ export default function Header() {
           <div className="hidden sm:flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200/60">
             <button
               onClick={() => handleLanguageChange('en')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer text-[11px] ${
+              className={`min-h-9 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                 currentLocale === 'en' 
                   ? 'bg-white text-slate-900 shadow-xs font-black' 
                   : 'text-slate-500 hover:text-slate-900'
@@ -363,7 +363,7 @@ export default function Header() {
             {(isOwner || isAdmin) && (
               <Link 
                 href="/owner/buses" 
-                className={`p-3 rounded-xl flex items-center gap-3 transition ${
+                className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                   isOwnerActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
                 }`}
               >
@@ -375,7 +375,7 @@ export default function Header() {
             {isStaff && (
               <Link 
                 href="/scan" 
-                className={`p-3 rounded-xl flex items-center gap-3 transition ${
+                className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                   isScanActive ? 'bg-slate-900 text-orange-400 font-bold' : 'bg-slate-900 text-slate-200'
                 }`}
               >
@@ -400,7 +400,7 @@ export default function Header() {
             <div className="flex gap-1">
               <button 
                 onClick={() => handleLanguageChange('en')} 
-                className={`px-3 py-1.5 rounded-lg font-bold ${currentLocale === 'en' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`min-h-10 px-3 py-2 rounded-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${currentLocale === 'en' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 English
               </button>

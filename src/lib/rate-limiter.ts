@@ -2,6 +2,7 @@ import { HttpError } from '@/lib/auth-server';
 
 interface RateLimitRecord { count: number; resetAt: number }
 const localStore = new Map<string, RateLimitRecord>();
+const legacyStore = new Map<string, RateLimitRecord>();
 
 function getClientIp(req: Request): string {
   const realIp = req.headers.get('x-real-ip')?.trim();
@@ -14,16 +15,27 @@ function getClientIp(req: Request): string {
   return 'unknown';
 }
 
-function localLimit(key: string, max: number, windowSeconds: number) {
+function localLimit(store: Map<string, RateLimitRecord>, key: string, max: number, windowSeconds: number) {
   const now = Date.now();
-  const entry = localStore.get(key);
+  const entry = store.get(key);
   if (!entry || entry.resetAt <= now) {
-    localStore.set(key, { count: 1, resetAt: now + windowSeconds * 1000 });
+    store.set(key, { count: 1, resetAt: now + windowSeconds * 1000 });
     return { allowed: true, resetSeconds: windowSeconds };
   }
   if (entry.count >= max) return { allowed: false, resetSeconds: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)) };
   entry.count += 1;
   return { allowed: true, resetSeconds: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)) };
+}
+
+/**
+ * Legacy synchronous process-local limiter retained for existing PayHere routes.
+ * Do not use for new production API handlers.
+ */
+export function enforceRateLimit(req: Request, action: string, maxRequests = 30, windowSeconds = 60): void {
+  const result = localLimit(legacyStore, `${action}:${getClientIp(req)}`, maxRequests, windowSeconds);
+  if (!result.allowed) {
+    throw new HttpError(429, `Too many requests. Please wait ${result.resetSeconds} seconds before trying again.`);
+  }
 }
 
 async function sharedLimit(key: string, max: number, windowSeconds: number) {
@@ -33,7 +45,7 @@ async function sharedLimit(key: string, max: number, windowSeconds: number) {
     if (process.env.NODE_ENV === 'production') {
       throw new HttpError(503, 'Rate limiting is not configured. Please try again later.');
     }
-    return localLimit(key, max, windowSeconds);
+    return localLimit(localStore, key, max, windowSeconds);
   }
 
   const script = "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]); end; return {count, redis.call('PTTL', KEYS[1])}";
@@ -62,7 +74,8 @@ async function sharedLimit(key: string, max: number, windowSeconds: number) {
   return { allowed: count <= max, resetSeconds: Math.max(1, Math.ceil(ttl / 1000)) };
 }
 
-export async function enforceRateLimit(req: Request, action: string, maxRequests = 30, windowSeconds = 60): Promise<void> {
+/** Shared, atomic rate limiting for non-PayHere production API handlers. */
+export async function enforceSharedRateLimit(req: Request, action: string, maxRequests = 30, windowSeconds = 60): Promise<void> {
   const key = `${action}:${getClientIp(req)}`;
   const result = await sharedLimit(key, maxRequests, windowSeconds);
   if (!result.allowed) {

@@ -155,21 +155,21 @@ button:disabled {
   header,
   footer,
   nav,
-  .print\\:hidden,
-  button:not(.print\\:show) {
+  .print\:hidden,
+  button:not(.print\:show) {
     display: none !important;
   }
 
-  .print\\:border {
+  .print\:border {
     border: 1px solid #94a3b8 !important;
     box-shadow: none !important;
   }
 
-  .print\\:shadow-none {
+  .print\:shadow-none {
     box-shadow: none !important;
   }
 
-  .print\\:w-full {
+  .print\:w-full {
     width: 100% !important;
     max-width: 100% !important;
   }

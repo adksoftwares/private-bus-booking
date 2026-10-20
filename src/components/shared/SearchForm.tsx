@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from '@/i18n/routing';
 import { MapPin, Navigation, Calendar, ArrowLeftRight, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -14,22 +14,29 @@ export default function SearchForm() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
-  // Use the user's local calendar date, not UTC (Sri Lanka is UTC+05:30).
-  const toLocalDateString = (value: Date) =>
-    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-  const today = new Date();
-  const todayStr = toLocalDateString(today);
+  // Resolve local dates after mount to avoid server/client timezone hydration mismatches.
+  const [todayStr, setTodayStr] = useState('');
+  const [tomorrowStr, setTomorrowStr] = useState('');
+  useEffect(() => {
+    const toLocalDateString = (value: Date) =>
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    const today = new Date();
+    const todayValue = toLocalDateString(today);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setTodayStr(todayValue);
+    setTomorrowStr(toLocalDateString(tomorrow));
+    setDate((current) => current || todayValue);
+  }, []);
 
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = toLocalDateString(tomorrow);
-
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState('');
 
   const [fromSuggestions, setFromSuggestions] = useState<BusStand[]>([]);
   const [toSuggestions, setToSuggestions] = useState<BusStand[]>([]);
   const [showFrom, setShowFrom] = useState(false);
   const [showTo, setShowTo] = useState(false);
+  const [highlightedFromIndex, setHighlightedFromIndex] = useState(-1);
+  const [highlightedToIndex, setHighlightedToIndex] = useState(-1);
   const [validationError, setValidationError] = useState('');
 
   const handleSearch = (e: React.FormEvent) => {
@@ -69,6 +76,7 @@ export default function SearchForm() {
 
   const handleFromChange = (val: string) => {
     setFrom(val);
+    setHighlightedFromIndex(-1);
     if (val.trim().length > 0) {
       setFromSuggestions(searchBusStands(val, 12));
       setShowFrom(true);
@@ -80,6 +88,7 @@ export default function SearchForm() {
 
   const handleToChange = (val: string) => {
     setTo(val);
+    setHighlightedToIndex(-1);
     if (val.trim().length > 0) {
       setToSuggestions(searchBusStands(val, 12));
       setShowTo(true);
@@ -89,6 +98,28 @@ export default function SearchForm() {
     }
   };
 
+  const handleLocationKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, field: 'from' | 'to') => {
+    const suggestions = field === 'from' ? fromSuggestions : toSuggestions;
+    const isOpen = field === 'from' ? showFrom : showTo;
+    const index = field === 'from' ? highlightedFromIndex : highlightedToIndex;
+    const setIndex = field === 'from' ? setHighlightedFromIndex : setHighlightedToIndex;
+    if (event.key === 'Escape') {
+      if (isOpen) { event.preventDefault(); if (field === 'from') setShowFrom(false); else setShowTo(false); }
+      return;
+    }
+    if (!isOpen || suggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault(); setIndex(current => current >= suggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault(); setIndex(current => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === 'Enter' && index >= 0) {
+      event.preventDefault();
+      const selected = suggestions[index];
+      if (field === 'from') { setFrom(selected.name); setShowFrom(false); }
+      else { setTo(selected.name); setShowTo(false); }
+      setIndex(-1);
+    }
+  };
   return (
     <div className="w-full">
       {validationError && (
@@ -112,6 +143,7 @@ export default function SearchForm() {
             <input 
               id="search-origin"
               type="text" 
+              onKeyDown={e => handleLocationKeyDown(e, 'from')}
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={showFrom && fromSuggestions.length > 0}
@@ -185,6 +217,7 @@ export default function SearchForm() {
             <input 
               id="search-destination"
               type="text" 
+              onKeyDown={e => handleLocationKeyDown(e, 'to')}
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={showTo && toSuggestions.length > 0}
@@ -248,6 +281,8 @@ export default function SearchForm() {
                 <button
                   type="button"
                   onClick={() => setDate(todayStr)}
+                  disabled={!todayStr}
+                  aria-pressed={date === todayStr}
                   className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${date === todayStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Today
@@ -255,6 +290,8 @@ export default function SearchForm() {
                 <button
                   type="button"
                   onClick={() => setDate(tomorrowStr)}
+                  disabled={!tomorrowStr}
+                  aria-pressed={date === tomorrowStr}
                   className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${date === tomorrowStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Tomorrow

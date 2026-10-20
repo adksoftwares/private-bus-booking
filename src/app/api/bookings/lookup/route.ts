@@ -7,7 +7,7 @@ import { lookupBookingByReference } from '@/lib/services/booking-service';
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting against enumeration and brute force (30 requests / minute)
-    enforceRateLimit(req, 'lookup-booking', 30, 60);
+    await enforceRateLimit(req, 'lookup-booking', 30, 60);
 
     const body = await req.json();
     const { reference, bookingId, phone, accessToken } = lookupBookingSchema.parse(body);

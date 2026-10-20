@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 
 export async function POST(req: Request) {
   try {
-    await enforceRateLimit(req, 'seat-unlock', 60, 60);
+    await enforceSharedRateLimit(req, 'seat-unlock', 60, 60);
 
     const body = await req.json();
     const { tripId, seatId, guestSessionId } = body;

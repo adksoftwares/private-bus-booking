@@ -1,19 +1,18 @@
 "use client";
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import { useRouter } from '@/i18n/routing';
 import { MapPin, Navigation, Calendar, ArrowLeftRight, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { BusStand } from '@/types/location';
 import { searchBusStands, MAJOR_TRANSPORT_HUBS } from '@/data/sriLankaBusStands';
 
-
-const subscribeToNoChanges = () => () => {};
-const getServerDateSnapshot = () => '';
-const getLocalDateString = (daysFromToday: number) => {
+const getSriLankaDateString = (daysFromToday: number) => {
   const value = new Date();
-  value.setDate(value.getDate() + daysFromToday);
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  if (daysFromToday !== 0) {
+    value.setDate(value.getDate() + daysFromToday);
+  }
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' }).format(value);
 };
 
 export default function SearchForm() {
@@ -23,9 +22,9 @@ export default function SearchForm() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
-  // Hydration-safe local dates: the server snapshot is empty; the browser supplies local calendar dates.
-  const todayStr = useSyncExternalStore(subscribeToNoChanges, () => getLocalDateString(0), getServerDateSnapshot);
-  const tomorrowStr = useSyncExternalStore(subscribeToNoChanges, () => getLocalDateString(1), getServerDateSnapshot);
+  // Hydration-safe Sri Lanka Standard Time dates identical across SSR and client
+  const todayStr = getSriLankaDateString(0);
+  const tomorrowStr = getSriLankaDateString(1);
 
   const [date, setDate] = useState('');
 
@@ -310,6 +309,7 @@ export default function SearchForm() {
               required 
               min={todayStr}
               id="search-travel-date"
+              suppressHydrationWarning
               className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent cursor-pointer"
               value={date || todayStr} 
               onChange={e => setDate(e.target.value)}

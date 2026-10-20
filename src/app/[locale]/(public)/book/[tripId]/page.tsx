@@ -230,7 +230,7 @@ export default function BookingPage() {
         </div>
 
         {/* Bus Journey Header Overview Banner */}
-        <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div aria-label="Selected bus journey" className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm mb-5 sm:mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="font-mono text-xs font-black bg-slate-900 text-amber-300 px-2 py-0.5 rounded">
@@ -276,10 +276,10 @@ export default function BookingPage() {
         </div>
 
         {/* Main Content: Left Seat Map, Right Booking Card */}
-        <div className="flex flex-col lg:flex-row items-start gap-6">
+        <div className="flex flex-col lg:flex-row items-start gap-4 sm:gap-6">
           
           {/* Left: Authentic Sri Lanka Seat Map */}
-          <div className="flex-1 w-full bg-white p-5 sm:p-6 border border-slate-200/90 rounded-3xl shadow-sm">
+          <div aria-label="Seat selection" className="flex-1 w-full min-w-0 bg-white p-4 sm:p-6 border border-slate-200 rounded-2xl sm:rounded-3xl shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2 pb-3 border-b border-slate-100">
               <div>
                 <h2 className="text-lg font-black text-slate-900">
@@ -312,7 +312,7 @@ export default function BookingPage() {
           <div className="w-full lg:w-96 flex flex-col gap-6">
             
             {/* Trip Fare Summary Card */}
-            <div className="bg-white p-5 sm:p-6 border border-slate-200/90 rounded-3xl shadow-sm">
+            <div aria-label="Fare summary" className="bg-white p-4 sm:p-6 border border-slate-200 rounded-2xl sm:rounded-3xl shadow-sm">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 pb-2 border-b border-slate-100">
                 {t('tripSummary')}
               </h3>
@@ -350,7 +350,7 @@ export default function BookingPage() {
             </div>
 
             {/* Passenger Details & Booking Choice */}
-            <div className="bg-white p-5 sm:p-6 border border-slate-200/90 rounded-3xl shadow-sm">
+            <div aria-label="Passenger information" className="bg-white p-4 sm:p-6 border border-slate-200 rounded-2xl sm:rounded-3xl shadow-sm">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 pb-2 border-b border-slate-100">
                 {t('passengerInfo')}
               </h3>
@@ -414,28 +414,33 @@ export default function BookingPage() {
               {/* Passenger Inputs */}
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                  <label htmlFor="passenger-full-name" className="block text-xs font-semibold text-slate-700 mb-1.5">
                     {t('fullName')} *
                   </label>
                   <input 
+                    id="passenger-full-name"
                     type="text" 
+                    autoComplete="name"
                     placeholder="e.g. Ruwan Perera" 
                     required 
-                    className="p-3 border border-slate-300 rounded-xl w-full text-xs font-bold outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    className="min-h-12 px-3.5 py-3 border border-slate-300 rounded-xl w-full text-base sm:text-sm text-slate-900 outline-none transition-shadow focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                     value={passengerDetails.name} 
                     onChange={e => setPassengerDetails({...passengerDetails, name: e.target.value})}
                   />
                 </div>
                 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                  <label htmlFor="passenger-phone" className="block text-xs font-semibold text-slate-700 mb-1.5">
                     {t('mobilePhone')} *
                   </label>
                   <input 
+                    id="passenger-phone"
                     type="tel" 
+                    autoComplete="tel"
+                    inputMode="tel"
                     placeholder="0771234567" 
                     required 
-                    className="p-3 border border-slate-300 rounded-xl w-full text-xs font-mono font-bold outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    className="min-h-12 px-3.5 py-3 border border-slate-300 rounded-xl w-full text-base sm:text-sm font-mono text-slate-900 outline-none transition-shadow focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                     value={passengerDetails.phone} 
                     onChange={e => setPassengerDetails({...passengerDetails, phone: e.target.value})}
                   />
@@ -445,13 +450,16 @@ export default function BookingPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                  <label htmlFor="passenger-email" className="block text-xs font-semibold text-slate-700 mb-1.5">
                     {t('email')}
                   </label>
                   <input 
+                    id="passenger-email"
                     type="email" 
+                    autoComplete="email"
+                    inputMode="email"
                     placeholder="passenger@example.com" 
-                    className="p-3 border border-slate-300 rounded-xl w-full text-xs font-medium outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    className="min-h-12 px-3.5 py-3 border border-slate-300 rounded-xl w-full text-base sm:text-sm text-slate-900 outline-none transition-shadow focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                     value={passengerDetails.email} 
                     onChange={e => setPassengerDetails({...passengerDetails, email: e.target.value})}
                   />
@@ -470,7 +478,7 @@ export default function BookingPage() {
                   type="button"
                   onClick={handleProceedToPayment}
                   disabled={selectedSeats.length === 0 || submitting}
-                  className="w-full bg-orange-600 hover:bg-orange-700 active:scale-95 text-white font-black py-4 rounded-2xl transition disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer text-sm mt-3"
+                  className="w-full min-h-12 bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl sm:rounded-2xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center gap-2 cursor-pointer text-sm mt-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
                 >
                   <CreditCard className="w-4 h-4" />
                   <span>

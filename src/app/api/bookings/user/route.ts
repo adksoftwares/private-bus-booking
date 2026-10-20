@@ -6,7 +6,7 @@ import { Booking } from '@/types/booking';
 
 export async function GET(req: Request) {
   try {
-    enforceRateLimit(req, 'user_bookings', 30, 60);
+    await enforceRateLimit(req, 'user_bookings', 30, 60);
     const user = await requireAuth(req);
     const supabase = getSupabaseAdminClient();
 

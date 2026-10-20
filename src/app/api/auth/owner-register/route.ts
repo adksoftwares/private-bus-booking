@@ -8,7 +8,7 @@ import { Json } from '@/types/database';
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting & Server authentication
-    enforceRateLimit(req, 'owner_register', 5, 60);
+    await enforceRateLimit(req, 'owner_register', 5, 60);
     const user = await requireAuth(req);
 
     // 2. Strict Zod validation

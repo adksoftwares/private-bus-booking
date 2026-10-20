@@ -218,7 +218,7 @@ export default function TicketPage() {
   if (needsPhoneVerification) {
     return (
       <div className="max-w-md mx-auto my-16 px-4">
-        <div className="p-8 text-center bg-white border border-slate-200 rounded-3xl shadow-xl">
+        <div className="p-5 sm:p-8 text-center bg-white border border-slate-200 rounded-2xl sm:rounded-3xl shadow-sm sm:shadow-md">
           <div className="w-14 h-14 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <KeyRound className="w-7 h-7" />
           </div>
@@ -242,12 +242,12 @@ export default function TicketPage() {
                 placeholder={t('verifyPhonePlaceholder')}
                 value={verifyPhoneInput}
                 onChange={e => setVerifyPhoneInput(e.target.value)}
-                className="w-full p-3.5 border border-slate-300 rounded-xl text-center font-mono font-bold text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition"
+                className="w-full min-h-12 p-3.5 border border-slate-300 rounded-xl text-center font-mono text-base text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100 transition-shadow"
               />
             </div>
             <button
               type="submit"
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3.5 rounded-xl transition shadow-md hover:shadow-lg active:scale-95 cursor-pointer text-sm"
+              className="w-full min-h-12 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3.5 px-4 rounded-xl transition-colors shadow-sm hover:shadow-md active:scale-[0.99] cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
             >
               {t('verifyAndView')}
             </button>
@@ -326,7 +326,7 @@ export default function TicketPage() {
   ].join('\n');
 
   return (
-    <div className="max-w-3xl mx-auto my-8 px-4 sm:px-6">
+    <div className="max-w-3xl mx-auto my-5 sm:my-8 px-3 sm:px-6">
       
       {/* Top Banner & Guest Claim Notice */}
       {isGuest && showAccountPrompt && (
@@ -380,7 +380,7 @@ export default function TicketPage() {
       )}
 
       {/* Main Boarding Pass Card */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden print:shadow-none print:border-2 print:border-slate-800 print:rounded-2xl relative">
+      <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-md sm:shadow-xl overflow-hidden print:shadow-none print:border-2 print:border-slate-800 print:rounded-2xl relative">
         
         {/* Top Header Strip */}
         <div className="bg-slate-900 text-white px-6 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800">
@@ -421,7 +421,7 @@ export default function TicketPage() {
         <div className="flex flex-col md:flex-row relative">
           
           {/* Main Stub (Left on desktop) */}
-          <div className="p-6 sm:p-8 flex-1 flex flex-col justify-between">
+          <div className="p-4 sm:p-6 lg:p-8 flex-1 min-w-0 flex flex-col justify-between">
             <div>
               {/* Route Origin &rarr; Destination Hero */}
               <div className="pb-6 mb-6 border-b border-slate-100">
@@ -434,15 +434,15 @@ export default function TicketPage() {
                   <span>Arrival Terminal</span>
                 </div>
 
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                <div className="flex items-center justify-between gap-2 sm:gap-4 min-w-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xl sm:text-3xl font-bold sm:font-black text-slate-900 tracking-tight break-words">
                       {startCity}
                     </p>
                     <p className="text-xs font-semibold text-slate-500 mt-0.5">Central Bus Stand</p>
                   </div>
 
-                  <div className="flex flex-col items-center px-2">
+                  <div className="flex flex-col items-center shrink-0 px-1 sm:px-2">
                     <div className="w-8 h-8 rounded-full bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600">
                       <ArrowRight className="w-4 h-4" />
                     </div>
@@ -453,7 +453,7 @@ export default function TicketPage() {
                     )}
                   </div>
 
-                  <div className="flex-1 text-right">
+                  <div className="flex-1 min-w-0 text-right">
                     <p className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
                       {endCity}
                     </p>
@@ -555,7 +555,7 @@ export default function TicketPage() {
           </div>
 
           {/* Right Stub: QR Code & Security Stamp */}
-          <div className="bg-slate-50/70 p-6 sm:p-8 md:w-64 shrink-0 flex flex-col items-center justify-between text-center border-t md:border-t-0 border-slate-100 print:bg-white">
+          <div className="bg-slate-50/70 p-4 sm:p-6 md:p-8 md:w-64 shrink-0 flex flex-col items-center justify-between text-center border-t md:border-t-0 border-slate-100 print:bg-white">
             <div className="flex flex-col items-center w-full">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
                 {t('eTicketPass')}
@@ -584,7 +584,7 @@ export default function TicketPage() {
                     </span>
                     <button
                       onClick={() => handleCopyReference(formattedCCode)}
-                      className="text-slate-400 hover:text-orange-600 transition p-1 cursor-pointer print:hidden"
+                      className="min-h-8 min-w-8 flex items-center justify-center text-slate-500 hover:text-orange-600 transition p-1 rounded-md cursor-pointer print:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
                       title="Copy C-Code"
                     >
                       {copiedRef ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -636,10 +636,10 @@ export default function TicketPage() {
       </div>
 
       {/* Action Buttons: Print, Share, Navigation */}
-      <div className="flex flex-wrap items-center justify-center gap-3 mt-8 print:hidden">
+      <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center gap-2.5 sm:gap-3 mt-5 sm:mt-8 print:hidden">
         <button
           onClick={handleDownloadPDF}
-          className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md hover:shadow-lg transition active:scale-95 cursor-pointer text-sm"
+          className="flex min-h-12 items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold px-5 sm:px-6 py-3.5 rounded-xl shadow-sm hover:shadow-md transition-colors active:scale-[0.99] cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
         >
           <Printer className="w-4 h-4" />
           <span>Print / Save Ticket</span>
@@ -647,7 +647,7 @@ export default function TicketPage() {
 
         <button
           onClick={handleShare}
-          className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-bold px-5 py-3.5 rounded-xl border border-slate-300 shadow-2xs hover:shadow transition active:scale-95 cursor-pointer text-sm"
+          className="flex min-h-12 items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold px-5 py-3.5 rounded-xl border border-slate-300 shadow-2xs hover:shadow transition-colors active:scale-[0.99] cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
         >
           {shareSuccess ? <Check className="w-4 h-4 text-emerald-600" /> : <Share2 className="w-4 h-4 text-orange-600" />}
           <span>{shareSuccess ? 'Link Copied!' : 'Share Pass'}</span>

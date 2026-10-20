@@ -123,7 +123,7 @@ function SearchResults() {
     if (!date) return;
     const current = new Date(date);
     current.setDate(current.getDate() + days);
-    const newDateStr = current.toISOString().split('T')[0];
+    const newDateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
     router.push(`/search?from=${encodeURIComponent(from || '')}&to=${encodeURIComponent(to || '')}&date=${newDateStr}`);
   };
 
@@ -182,7 +182,7 @@ function SearchResults() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
       {/* Route Header Banner */}
-      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-[0_3px_14px_rgba(18,31,43,0.045)] mb-6">
+      <div aria-label="Journey search summary" className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm mb-5 sm:mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           
           {/* Origin -> Destination Route Details */}
@@ -246,24 +246,28 @@ function SearchResults() {
             </span>
             <button
               onClick={() => setSelectedTypeFilter('all')}
+              aria-pressed={selectedTypeFilter === 'all'}
               className={`px-3 py-1.5 rounded-xl transition cursor-pointer ${selectedTypeFilter === 'all' ? 'bg-orange-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               All Buses
             </button>
             <button
               onClick={() => setSelectedTypeFilter('ac')}
+              aria-pressed={selectedTypeFilter === 'ac'}
               className={`px-3 py-1.5 rounded-xl transition cursor-pointer ${selectedTypeFilter === 'ac' ? 'bg-orange-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               Luxury AC
             </button>
             <button
               onClick={() => setSelectedTypeFilter('semi')}
+              aria-pressed={selectedTypeFilter === 'semi'}
               className={`px-3 py-1.5 rounded-xl transition cursor-pointer ${selectedTypeFilter === 'semi' ? 'bg-orange-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               Semi Luxury
             </button>
             <button
               onClick={() => setSelectedTypeFilter('vip')}
+              aria-pressed={selectedTypeFilter === 'vip'}
               className={`px-3 py-1.5 rounded-xl transition cursor-pointer ${selectedTypeFilter === 'vip' ? 'bg-purple-700 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               2+1 VIP
@@ -274,24 +278,28 @@ function SearchResults() {
             {/* Time of Day */}
             <button
               onClick={() => setSelectedTimeFilter('all')}
+              aria-pressed={selectedTimeFilter === 'all'}
               className={`px-2.5 py-1.5 rounded-xl transition cursor-pointer ${selectedTimeFilter === 'all' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               All Times
             </button>
             <button
               onClick={() => setSelectedTimeFilter('morning')}
+              aria-pressed={selectedTimeFilter === 'morning'}
               className={`px-2.5 py-1.5 rounded-xl transition cursor-pointer ${selectedTimeFilter === 'morning' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               Morning
             </button>
             <button
               onClick={() => setSelectedTimeFilter('afternoon')}
+              aria-pressed={selectedTimeFilter === 'afternoon'}
               className={`px-2.5 py-1.5 rounded-xl transition cursor-pointer ${selectedTimeFilter === 'afternoon' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               Afternoon
             </button>
             <button
               onClick={() => setSelectedTimeFilter('night')}
+              aria-pressed={selectedTimeFilter === 'night'}
               className={`px-2.5 py-1.5 rounded-xl transition cursor-pointer ${selectedTimeFilter === 'night' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               Night
@@ -372,7 +380,7 @@ function SearchResults() {
             return (
               <div 
                 key={trip.id} 
-                className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-6 group"
+                className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm hover:shadow-md hover:border-orange-200 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6 group min-w-0"
               >
                 {/* Left & Center: Bus Identity, Timeline, Amenities */}
                 <div className="flex-1">
@@ -408,10 +416,10 @@ function SearchResults() {
                   </div>
 
                   {/* Journey Timeline */}
-                  <div className="flex items-center gap-4 sm:gap-8 my-4 py-2 border-y border-slate-100">
+                  <div className="flex items-center gap-2 sm:gap-8 my-4 py-3 border-y border-slate-100 min-w-0">
                     {/* Departure */}
                     <div>
-                      <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono tracking-tight">
+                      <div className="text-xl sm:text-3xl font-bold sm:font-black text-slate-900 font-mono tracking-tight tabular-nums">
                         {trip.departureTime}
                       </div>
                       <div className="text-xs font-bold text-slate-800 capitalize mt-0.5">
@@ -423,7 +431,7 @@ function SearchResults() {
                     </div>
 
                     {/* Expressway / Route Specs Line */}
-                    <div className="flex-1 flex flex-col items-center px-2">
+                    <div className="flex-1 min-w-8 flex flex-col items-center px-1 sm:px-2">
                       <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase">
                         {trip.duration || 'Direct Expressway'}
                       </span>
@@ -437,7 +445,7 @@ function SearchResults() {
 
                     {/* Arrival */}
                     <div className="text-right">
-                      <div className="text-2xl sm:text-3xl font-black text-slate-700 font-mono tracking-tight">
+                      <div className="text-xl sm:text-3xl font-bold sm:font-black text-slate-700 font-mono tracking-tight tabular-nums">
                         {trip.arrivalTime || 'Scheduled'}
                       </div>
                       <div className="text-xs font-bold text-slate-800 capitalize mt-0.5">
@@ -509,7 +517,7 @@ function SearchResults() {
                       }
                       router.push(`/book/${trip.id}`);
                     }}
-                    className="bg-orange-600 hover:bg-orange-700 active:scale-95 text-white px-6 py-3.5 rounded-2xl shadow-md hover:shadow-lg font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap"
+                    className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white px-4 sm:px-6 py-3.5 rounded-xl sm:rounded-2xl shadow-sm hover:shadow-md font-bold text-sm transition-colors cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
                   >
                     <span>Select Seats & Book</span>
                     <ArrowRight className="w-4 h-4 stroke-[2.5]" />

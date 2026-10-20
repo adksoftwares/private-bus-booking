@@ -129,7 +129,7 @@ export default function SearchForm() {
 
       <form 
         onSubmit={handleSearch} 
-        className="w-full max-w-5xl mx-auto bg-white p-2.5 sm:p-3.5 rounded-3xl shadow-[0_18px_50px_rgba(18,31,43,0.12)] border border-slate-200/90 relative"
+        className="w-full max-w-5xl mx-auto bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-[0_8px_28px_rgba(18,31,43,0.09)] border border-slate-200 relative"
       >
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
           
@@ -151,7 +151,7 @@ export default function SearchForm() {
               autoComplete="off"
               required 
               placeholder="e.g. Colombo (Bastian Mwt)"
-              className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent placeholder-slate-400"
+              className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent placeholder-slate-400"
               value={from} 
               onChange={e => handleFromChange(e.target.value)}
               onFocus={() => {
@@ -163,7 +163,7 @@ export default function SearchForm() {
             
             {/* Auto-suggest dropdown */}
             {showFrom && fromSuggestions.length > 0 && (
-              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
                 <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Origin Station / Stand
                 </li>
@@ -173,7 +173,7 @@ export default function SearchForm() {
                     id={`search-origin-option-${stand.id}`}
                     role="option"
                     aria-selected={highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id)}
-                    className={`px-3.5 py-2.5 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2 ${highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    className={`px-3.5 py-3 min-h-12 cursor-pointer text-slate-800 transition-colors flex items-start justify-between gap-2 ${highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
                     onMouseDown={() => { setFrom(stand.name); setShowFrom(false); setHighlightedFromIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
@@ -204,7 +204,7 @@ export default function SearchForm() {
               type="button"
               onClick={handleSwap}
               title={t('swap')}
-              className="w-9 h-9 rounded-full bg-white hover:bg-orange-50 text-slate-600 hover:text-orange-600 border border-slate-300 shadow-sm transition-all duration-200 hover:scale-105 active:rotate-180 cursor-pointer flex items-center justify-center shrink-0"
+              className="w-11 h-11 rounded-full bg-white hover:bg-orange-50 text-slate-600 hover:text-orange-600 border border-slate-300 shadow-sm transition-colors active:rotate-180 cursor-pointer flex items-center justify-center shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               aria-label="Swap departure and arrival locations"
             >
               <ArrowLeftRight className="w-4 h-4" />
@@ -251,7 +251,7 @@ export default function SearchForm() {
                     id={`search-destination-option-${stand.id}`}
                     role="option"
                     aria-selected={highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id)}
-                    className={`px-3.5 py-2.5 cursor-pointer text-slate-800 transition flex items-start justify-between gap-2 ${highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    className={`px-3.5 py-3 min-h-12 cursor-pointer text-slate-800 transition-colors flex items-start justify-between gap-2 ${highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
                     onMouseDown={() => { setTo(stand.name); setShowTo(false); setHighlightedToIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
@@ -279,7 +279,7 @@ export default function SearchForm() {
           {/* Travel Date Field + Quick Date Chips */}
           <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all">
             <div className="flex items-center justify-between mb-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <label htmlFor="search-travel-date" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-orange-600" />
                 <span>{t('date')}</span>
               </label>
@@ -309,7 +309,8 @@ export default function SearchForm() {
               type="date" 
               required 
               min={todayStr}
-              className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent cursor-pointer"
+              id="search-travel-date"
+              className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent cursor-pointer"
               value={date || todayStr} 
               onChange={e => setDate(e.target.value)}
             />
@@ -318,7 +319,7 @@ export default function SearchForm() {
           {/* Primary Search CTA Button */}
           <button 
             type="submit" 
-            className="bg-orange-600 hover:bg-orange-700 active:scale-[0.98] text-white font-bold py-4 px-8 rounded-2xl transition-all shadow-[0_5px_14px_rgba(173,72,37,0.22)] hover:shadow-[0_8px_20px_rgba(173,72,37,0.25)] text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer shrink-0"
+            className="min-h-12 bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 sm:px-8 rounded-xl sm:rounded-2xl transition-colors shadow-sm hover:shadow-md text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
           >
             <Search className="w-5 h-5 stroke-[2.5]" />
             <span>{t('searchBuses')}</span>

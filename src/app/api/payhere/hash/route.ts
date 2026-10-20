@@ -9,7 +9,7 @@ import { lookupBookingByReference } from '@/lib/services/booking-service';
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    await enforceRateLimit(req, 'payhere_hash', 30, 60);
+    enforceRateLimit(req, 'payhere_hash', 30, 60);
 
     const body = await req.json();
     const { orderId, accessToken } = body;

@@ -97,7 +97,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting & Authoritative Server Authentication
-    enforceRateLimit(req, 'create_trip', 15, 60);
+    await enforceRateLimit(req, 'create_trip', 15, 60);
     const authenticatedUser = await requireOwner(req);
     const supabase = getAuthenticatedRequestClient(req);
 

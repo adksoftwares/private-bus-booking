@@ -118,6 +118,7 @@ export default function Header() {
           {(isOwner || isAdmin) && (
             <Link 
               href="/owner/buses" 
+              aria-current={isOwnerActive ? "page" : undefined}
               className={`px-3.5 py-2 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                 isOwnerActive 
                   ? 'bg-orange-50 text-orange-700 border border-orange-200 shadow-2xs' 
@@ -132,6 +133,7 @@ export default function Header() {
           {isStaff && (
             <Link 
               href="/scan" 
+              aria-current={isScanActive ? "page" : undefined}
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                 isScanActive
                   ? 'bg-slate-900 text-orange-400 ring-2 ring-orange-500 shadow-2xs'
@@ -151,7 +153,7 @@ export default function Header() {
           <div className="hidden sm:flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200/60">
             <button
               onClick={() => handleLanguageChange('en')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer text-[11px] ${
+              className={`min-h-9 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                 currentLocale === 'en' 
                   ? 'bg-white text-slate-900 shadow-xs font-black' 
                   : 'text-slate-500 hover:text-slate-900'
@@ -162,7 +164,7 @@ export default function Header() {
             </button>
             <button
               onClick={() => handleLanguageChange('ta')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer text-[11px] ${
+              className={`min-h-9 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                 currentLocale === 'ta' 
                   ? 'bg-white text-slate-900 shadow-xs font-black' 
                   : 'text-slate-500 hover:text-slate-900'
@@ -173,7 +175,7 @@ export default function Header() {
             </button>
             <button
               onClick={() => handleLanguageChange('si')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer text-[11px] ${
+              className={`min-h-9 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                 currentLocale === 'si' 
                   ? 'bg-white text-slate-900 shadow-xs font-black' 
                   : 'text-slate-500 hover:text-slate-900'
@@ -308,13 +310,13 @@ export default function Header() {
             <div className="flex items-center gap-2">
               <Link 
                 href="/login" 
-                className="text-[11px] sm:text-xs font-bold text-slate-700 hover:text-orange-600 px-2 sm:px-3 py-2 rounded-xl transition hover:bg-slate-100"
+                className="min-h-10 text-xs font-semibold text-slate-700 hover:text-orange-600 px-3 py-2 rounded-xl transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
                 Log In
               </Link>
               <Link 
                 href="/register" 
-                className="text-[11px] sm:text-xs font-bold bg-orange-600 hover:bg-orange-700 text-white px-2.5 sm:px-3.5 py-2 rounded-xl transition shadow-xs active:scale-95"
+                className="min-h-10 text-xs font-semibold bg-orange-600 hover:bg-orange-700 text-white px-3 sm:px-3.5 py-2 rounded-xl transition-colors shadow-xs active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
               >
                 Sign Up
               </Link>
@@ -324,7 +326,7 @@ export default function Header() {
           {/* Mobile Menu Hamburger Toggle */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
+            className="md:hidden min-h-11 min-w-11 p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
             aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
             aria-expanded={isMobileMenuOpen}
             aria-controls="lankabus-mobile-navigation"
@@ -340,7 +342,8 @@ export default function Header() {
           <nav className="flex flex-col gap-1 text-sm font-bold text-slate-700">
             <Link 
               href="/" 
-              className={`p-3 rounded-xl flex items-center gap-3 transition ${
+              aria-current={isHomeActive ? "page" : undefined}
+              className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition ${
                 isHomeActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
               }`}
             >
@@ -350,7 +353,8 @@ export default function Header() {
 
             <Link 
               href="/bookings" 
-              className={`p-3 rounded-xl flex items-center gap-3 transition ${
+              aria-current={isBookingsActive ? "page" : undefined}
+              className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition ${
                 isBookingsActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
               }`}
             >
@@ -361,7 +365,7 @@ export default function Header() {
             {(isOwner || isAdmin) && (
               <Link 
                 href="/owner/buses" 
-                className={`p-3 rounded-xl flex items-center gap-3 transition ${
+                className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                   isOwnerActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
                 }`}
               >
@@ -373,7 +377,7 @@ export default function Header() {
             {isStaff && (
               <Link 
                 href="/scan" 
-                className={`p-3 rounded-xl flex items-center gap-3 transition ${
+                className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                   isScanActive ? 'bg-slate-900 text-orange-400 font-bold' : 'bg-slate-900 text-slate-200'
                 }`}
               >
@@ -385,7 +389,7 @@ export default function Header() {
             {user && (
               <Link 
                 href="/profile" 
-                className="p-3 rounded-xl flex items-center gap-3 hover:bg-slate-50 transition"
+                className="min-h-12 p-3 rounded-xl flex items-center gap-3 hover:bg-slate-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
                 <UserIcon className="w-4 h-4 text-slate-500" />
                 <span>Account Profile</span>
@@ -398,19 +402,19 @@ export default function Header() {
             <div className="flex gap-1">
               <button 
                 onClick={() => handleLanguageChange('en')} 
-                className={`px-3 py-1.5 rounded-lg font-bold ${currentLocale === 'en' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`min-h-10 px-3 py-2 rounded-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${currentLocale === 'en' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 English
               </button>
               <button 
                 onClick={() => handleLanguageChange('ta')} 
-                className={`px-3 py-1.5 rounded-lg font-bold ${currentLocale === 'ta' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`min-h-10 px-3 py-2 rounded-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${currentLocale === 'ta' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 தமிழ்
               </button>
               <button 
                 onClick={() => handleLanguageChange('si')} 
-                className={`px-3 py-1.5 rounded-lg font-bold ${currentLocale === 'si' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`min-h-10 px-3 py-2 rounded-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${currentLocale === 'si' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 සිංහල
               </button>

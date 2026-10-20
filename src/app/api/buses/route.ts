@@ -63,7 +63,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting & Server authentication
-    enforceRateLimit(req, 'create_bus', 15, 60);
+    await enforceRateLimit(req, 'create_bus', 15, 60);
     const authenticatedUser = await requireOwner(req);
 
     // 2. Strict Zod payload validation

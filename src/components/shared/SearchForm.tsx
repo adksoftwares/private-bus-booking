@@ -97,12 +97,12 @@ export default function SearchForm() {
 
       <form 
         onSubmit={handleSearch} 
-        className="w-full max-w-5xl mx-auto bg-white p-2.5 sm:p-3.5 rounded-3xl shadow-xl border border-slate-200/90 relative"
+        className="w-full max-w-5xl mx-auto bg-white p-2.5 sm:p-3.5 rounded-3xl shadow-[0_18px_50px_rgba(18,31,43,0.12)] border border-slate-200/90 relative"
       >
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
           
           {/* Origin (From) Field */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
+          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('from')}</span>
@@ -223,7 +223,7 @@ export default function SearchForm() {
           </div>
 
           {/* Travel Date Field + Quick Date Chips */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 transition-all">
+          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all">
             <div className="flex items-center justify-between mb-1">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-orange-600" />
@@ -260,7 +260,7 @@ export default function SearchForm() {
           {/* Primary Search CTA Button */}
           <button 
             type="submit" 
-            className="bg-orange-600 hover:bg-orange-700 active:scale-95 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-md hover:shadow-lg text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer shrink-0"
+            className="bg-orange-600 hover:bg-orange-700 active:scale-[0.98] text-white font-bold py-4 px-8 rounded-2xl transition-all shadow-[0_5px_14px_rgba(173,72,37,0.22)] hover:shadow-[0_8px_20px_rgba(173,72,37,0.25)] text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer shrink-0"
           >
             <Search className="w-5 h-5 stroke-[2.5]" />
             <span>{t('searchBuses')}</span>

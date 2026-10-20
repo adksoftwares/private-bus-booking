@@ -1,20 +1,54 @@
 @import "tailwindcss";
 
+/*
+ * LankaBus visual system
+ * Calm neutral surfaces, deep ink text, and a restrained terracotta accent.
+ * Keep status colours (success, warning, danger) distinct from the brand accent.
+ */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  color-scheme: light;
+  --background: #f7f8fa;
+  --foreground: #172433;
   --card-bg: #ffffff;
-  --card-border: #e2e8f0;
-  --primary: #ea580c;
-  --primary-hover: #c2410c;
-  --navy: #0f172a;
+  --card-border: #dce2e8;
+  --primary: #cf6030;
+  --primary-hover: #ad4825;
+  --navy: #121f2b;
+  --muted: #667484;
+  --focus-ring: #e87945;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* A less saturated, warmer brand palette than Tailwind's default orange. */
+  --color-orange-50: #fff7f2;
+  --color-orange-100: #ffeadc;
+  --color-orange-200: #ffd2b5;
+  --color-orange-300: #ffb487;
+  --color-orange-400: #f58f5c;
+  --color-orange-500: #e87945;
+  --color-orange-600: #cf6030;
+  --color-orange-700: #ad4825;
+  --color-orange-800: #8d3a23;
+  --color-orange-900: #743322;
+  --color-orange-950: #41190f;
+
+  /* Cool, quiet neutrals keep cards and data easier to scan. */
+  --color-slate-50: #f7f8fa;
+  --color-slate-100: #eef1f4;
+  --color-slate-200: #dce2e8;
+  --color-slate-300: #c4cdd6;
+  --color-slate-400: #8b98a7;
+  --color-slate-500: #667484;
+  --color-slate-600: #4d5b69;
+  --color-slate-700: #354351;
+  --color-slate-800: #202d3a;
+  --color-slate-900: #121f2b;
+  --color-slate-950: #0a131c;
 }
 
 html {
@@ -26,6 +60,7 @@ html {
 }
 
 body {
+  min-height: 100%;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
@@ -33,6 +68,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+::selection {
+  color: #41190f;
+  background: #ffd2b5;
 }
 
 /* Keep form controls visually consistent with the rest of the interface. */
@@ -41,6 +82,18 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+input,
+select,
+textarea {
+  accent-color: var(--primary);
+}
+
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  color-scheme: light;
 }
 
 button,
@@ -61,28 +114,30 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* A clear keyboard focus state without relying on colour alone. */
 :where(a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
-  outline: 3px solid #fb923c;
+  outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
-/* Custom Scrollbars */
+/* Less visual noise while retaining a visible, usable scrollbar. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #eef1f4;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #c4cdd6;
+  border: 2px solid #eef1f4;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #8b98a7;
 }
 
-/* Subtle, purposeful UI animations */
+/* Subtle, purposeful UI animations. */
 @keyframes fadeInUp {
   from {
     opacity: 0;

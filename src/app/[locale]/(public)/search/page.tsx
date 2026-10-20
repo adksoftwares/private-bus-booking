@@ -182,7 +182,7 @@ function SearchResults() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
       {/* Route Header Banner */}
-      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm mb-6">
+      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-[0_3px_14px_rgba(18,31,43,0.045)] mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           
           {/* Origin -> Destination Route Details */}

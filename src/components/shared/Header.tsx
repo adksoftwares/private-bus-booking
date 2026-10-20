@@ -68,16 +68,16 @@ export default function Header() {
   const isScanActive = pathname.startsWith('/scan');
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs transition-colors">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-slate-200/80 shadow-[0_2px_12px_rgba(18,31,43,0.04)] transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4">
         
         {/* Brand Logo & Tagline */}
         <Link href="/" className="flex items-center gap-3 group shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-orange-600 text-white flex items-center justify-center shadow-sm group-hover:bg-orange-700 transition-colors">
+          <div className="w-10 h-10 rounded-2xl bg-orange-600 text-white flex items-center justify-center shadow-[0_5px_12px_rgba(173,72,37,0.20)] group-hover:bg-orange-700 transition-colors">
             <Bus className="w-5 h-5 stroke-[2.2]" />
           </div>
           <div className="flex flex-col">
-            <span className="font-black text-xl tracking-tight text-slate-900 group-hover:text-orange-600 transition-colors">
+            <span className="font-extrabold text-xl tracking-tight text-slate-900 group-hover:text-orange-700 transition-colors">
               Lanka<span className="text-orange-600">Bus</span>
             </span>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">

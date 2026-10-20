@@ -308,13 +308,13 @@ export default function Header() {
             <div className="flex items-center gap-2">
               <Link 
                 href="/login" 
-                className="text-[11px] sm:text-xs font-bold text-slate-700 hover:text-orange-600 px-2 sm:px-3 py-2 rounded-xl transition hover:bg-slate-100"
+                className="min-h-10 text-xs font-semibold text-slate-700 hover:text-orange-600 px-3 py-2 rounded-xl transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
                 Log In
               </Link>
               <Link 
                 href="/register" 
-                className="text-[11px] sm:text-xs font-bold bg-orange-600 hover:bg-orange-700 text-white px-2.5 sm:px-3.5 py-2 rounded-xl transition shadow-xs active:scale-95"
+                className="min-h-10 text-xs font-semibold bg-orange-600 hover:bg-orange-700 text-white px-3 sm:px-3.5 py-2 rounded-xl transition-colors shadow-xs active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
               >
                 Sign Up
               </Link>
@@ -324,7 +324,7 @@ export default function Header() {
           {/* Mobile Menu Hamburger Toggle */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
+            className="md:hidden min-h-11 min-w-11 p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
             aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
             aria-expanded={isMobileMenuOpen}
             aria-controls="lankabus-mobile-navigation"
@@ -340,7 +340,8 @@ export default function Header() {
           <nav className="flex flex-col gap-1 text-sm font-bold text-slate-700">
             <Link 
               href="/" 
-              className={`p-3 rounded-xl flex items-center gap-3 transition ${
+              aria-current={isHomeActive ? "page" : undefined}
+              className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition ${
                 isHomeActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
               }`}
             >
@@ -350,7 +351,8 @@ export default function Header() {
 
             <Link 
               href="/bookings" 
-              className={`p-3 rounded-xl flex items-center gap-3 transition ${
+              aria-current={isBookingsActive ? "page" : undefined}
+              className={`min-h-12 p-3 rounded-xl flex items-center gap-3 transition ${
                 isBookingsActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
               }`}
             >
@@ -385,7 +387,7 @@ export default function Header() {
             {user && (
               <Link 
                 href="/profile" 
-                className="p-3 rounded-xl flex items-center gap-3 hover:bg-slate-50 transition"
+                className="min-h-12 p-3 rounded-xl flex items-center gap-3 hover:bg-slate-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
                 <UserIcon className="w-4 h-4 text-slate-500" />
                 <span>Account Profile</span>

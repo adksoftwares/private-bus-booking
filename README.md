@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Private Bus Booking
 
-## Getting Started
+A multilingual bus-booking web application built with Next.js, React, TypeScript, Supabase, and next-intl. The project includes public trip search, seat selection/locking, booking lookup, owner trip management, staff scanning routes, and a PayHere integration.
 
-First, run the development server:
+## Requirements
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Node.js compatible with the installed Next.js version
+- npm
+- A Supabase project configured for this application
+- Environment variables configured locally and in the deployment platform
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Install dependencies:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   ```bash
+   npm install
+   ```
 
-## Learn More
+2. Configure the environment variables required by the Supabase client and the application. Use the variable names referenced in the source code and keep secret values out of Git.
+3. Start the development server:
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   npm run dev
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. Open http://localhost:3000.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Useful scripts
 
-## Deploy on Vercel
+- `npm run dev` — start the development server
+- `npm run build` — create a production build
+- `npm run start` — serve the production build
+- `npm run lint` — run ESLint
+- `npm test` — run the concurrency/security test script at `scripts/test-concurrency-and-security.ts`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+A script existing in the repository does not mean it has passed. Run the checks locally and in CI before deploying.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Application areas
+
+- Public trip search and schedule discovery
+- Route-aware results, filtering, and sorting
+- Seat selection and temporary seat locks
+- Booking lookup and ticket display
+- Bus-owner trip management
+- Staff ticket-scanning experience
+- Supabase-backed data and database migrations
+- PayHere payment integration
+
+## Security and release checklist
+
+Before deploying to production:
+
+- Confirm all required Supabase tables, functions, grants, and migrations are applied to the intended project.
+- Verify Row Level Security policies and server-side role/ownership checks for every private resource.
+- Test simultaneous attempts to reserve the same seat, expired locks, retries, and duplicate requests.
+- Check booking lookup for authorization enforcement, data minimization, and resistance to reference enumeration.
+- Use a shared/distributed rate limiter for multi-instance deployments; process-local limits are not a production-wide control.
+- Confirm proxy/IP header trust is configured for the actual hosting environment.
+- Review cache headers and ensure user-specific or sensitive data is never shared through a public cache.
+- Run `npm run lint`, `npm test`, and `npm run build`; fix failures before release.
+- Review payment confirmation separately. Never treat a browser/client callback alone as proof of payment. Keep payment credentials server-side and use provider-verified confirmation for paid status.
+
+## Payment integration note
+
+PayHere integration is intentionally retained as existing application code. Do not enable live payments until merchant onboarding, provider verification, environment configuration, and the payment confirmation flow have been independently checked. A client-side completion event alone must not authorize a booking to become paid/confirmed.
+
+## UI and accessibility notes
+
+The shared stylesheet includes visible keyboard focus indicators and reduced-motion support. Continue to test passenger booking on small mobile screens, keyboard-only navigation, screen readers, loading/error/empty states, and print output for tickets.
+
+## Deployment
+
+Deploy using the hosting platform configured for the repository. Set environment variables in the deployment environment, apply database migrations deliberately, and validate the production build and core booking flow in a staging environment before directing real passengers to the service.

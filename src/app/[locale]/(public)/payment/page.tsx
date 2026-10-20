@@ -274,10 +274,10 @@ export default function PaymentPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <Header />
 
-      <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-8">
+      <main className="flex-1 max-w-3xl w-full mx-auto px-3 sm:px-5 py-5 sm:py-8">
         
         {/* Top Trust Header */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6 sm:mb-8">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-xs font-black uppercase tracking-wider mb-2">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             <span>256-Bit SSL Encrypted Checkout</span>
@@ -297,15 +297,15 @@ export default function PaymentPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden mb-6">
+        <div aria-label="Reservation and payment summary" className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden mb-5 sm:mb-6">
           
           {/* Order Header Banner */}
-          <div className="bg-slate-900 text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="bg-slate-900 text-white p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
             <div>
               <span className="text-[10px] font-black uppercase tracking-wider text-orange-400 block mb-1">
                 Intercity Transit Pass
               </span>
-              <div className="flex items-center gap-2 text-xl font-black">
+              <div className="flex flex-wrap items-center gap-2 text-lg sm:text-xl font-bold sm:font-black">
                 <span>{booking.tripSnapshot?.routeSnapshot?.startCity}</span>
                 <ArrowRight className="w-4 h-4 text-slate-400" />
                 <span>{booking.tripSnapshot?.routeSnapshot?.endCity}</span>
@@ -321,7 +321,7 @@ export default function PaymentPage() {
           </div>
 
           {/* Details Body */}
-          <div className="p-5 sm:p-6 space-y-5 text-xs">
+          <div className="p-4 sm:p-6 space-y-5 text-xs">
             
             {/* Journey Specs Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pb-5 border-b border-slate-100">
@@ -432,7 +432,7 @@ export default function PaymentPage() {
           </div>
 
           {/* Checkout CTA Footer */}
-          <div className="bg-slate-50 p-5 sm:p-6 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="bg-slate-50 p-4 sm:p-6 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <Lock className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>Verified by PayHere Central Bank of Sri Lanka compliant payment system.</span>

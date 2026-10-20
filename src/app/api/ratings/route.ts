@@ -74,7 +74,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    enforceRateLimit(req, 'submit_rating', 10, 60);
+    await enforceRateLimit(req, 'submit_rating', 10, 60);
 
     // 2. Validate request payload
     const body = await req.json();

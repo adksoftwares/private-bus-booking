@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, HttpError } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { lookupBookingSchema } from '@/lib/validation/schemas';
 import { lookupBookingByReference } from '@/lib/services/booking-service';
 
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting against enumeration and brute force (30 requests / minute)
-    await enforceRateLimit(req, 'lookup-booking', 30, 60);
+    await enforceSharedRateLimit(req, 'lookup-booking', 30, 60);
 
     const body = await req.json();
     const { reference, bookingId, phone, accessToken } = lookupBookingSchema.parse(body);

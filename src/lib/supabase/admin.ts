@@ -21,6 +21,9 @@ export function getSupabaseAdminClient() {
   }
 
   const hasServiceRoleKey = Boolean(serviceRoleKey && !serviceRoleKey.includes('placeholder'));
+  if (!hasServiceRoleKey) {
+    console.warn('[WARNING] SUPABASE_SERVICE_ROLE_KEY is not configured or is a placeholder. Admin operations that require bypassing Row-Level Security (RLS) will fail with code 42501.');
+  }
   const effectiveKey = hasServiceRoleKey ? serviceRoleKey! : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!effectiveKey) {

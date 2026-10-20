@@ -40,7 +40,12 @@ export async function POST(req: Request) {
 
     if (ownerError) {
       console.error("Owner register error:", ownerError);
-      return NextResponse.json({ error: 'Failed to register operator account.' }, { status: 500 });
+      const isRlsError = (ownerError as { code?: string })?.code === '42501';
+      const isPlaceholderKey = !process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY.includes('placeholder');
+      const errorMsg = isRlsError && isPlaceholderKey
+        ? 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing or placeholder in .env.local. Please copy your service_role secret key from Supabase Dashboard > Project Settings > API.'
+        : 'Failed to register operator account.';
+      return NextResponse.json({ error: errorMsg }, { status: 500 });
     }
 
     // 4. Update profiles role to Owner (unless user is already an Admin, preventing accidental role demotion)

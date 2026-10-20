@@ -7,7 +7,7 @@ import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 
 export async function POST(req: Request) {
   try {
-    enforceRateLimit(req, 'seat-lock', 60, 60);
+    await enforceRateLimit(req, 'seat-lock', 60, 60);
 
     const body = await req.json();
     const { tripId, seatId, seatIds, guestSessionId } = body;

@@ -144,7 +144,7 @@ export default function Home() {
               return (
                 <div 
                   key={i} 
-                  className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between"
+                  className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_2px_10px_rgba(18,31,43,0.035)] hover:shadow-md hover:border-orange-200 transition-all duration-200 flex flex-col justify-between"
                 >
                   <div>
                     <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center mb-3">
@@ -187,7 +187,7 @@ export default function Home() {
               <Link
                 key={i}
                 href={`/search?from=${encodeURIComponent(r.from.toLowerCase())}&to=${encodeURIComponent(r.to.toLowerCase())}&date=${todayStr}`}
-                className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:border-orange-500 transition-all duration-200 group flex flex-col justify-between text-left"
+                className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-[0_2px_10px_rgba(18,31,43,0.035)] hover:shadow-md hover:border-orange-300 transition-all duration-200 group flex flex-col justify-between text-left"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-3">

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireAuth } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { updateProfileSchema, formatZodError } from '@/lib/validation/schemas';
 import { Json } from '@/types/database';
 
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    await enforceRateLimit(req, 'update_profile', 20, 60);
+    await enforceSharedRateLimit(req, 'update_profile', 20, 60);
     const user = await requireAuth(req);
     const body = await req.json();
 

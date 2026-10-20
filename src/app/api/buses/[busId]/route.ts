@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireOwner } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { updateBusSchema, formatZodError } from '@/lib/validation/schemas';
 import { Json } from '@/types/database';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ busId: string }> }) {
   try {
-    await enforceRateLimit(req, 'update_bus', 30, 60);
+    await enforceSharedRateLimit(req, 'update_bus', 30, 60);
     const { busId } = await params;
     const authenticatedUser = await requireOwner(req);
 

@@ -39,13 +39,13 @@ A script existing in the repository does not mean it has passed. Run the checks 
 
 ## Rate limiting configuration
 
-Production API rate limits use shared, atomic counters through Upstash Redis. Configure these server-only environment variables locally and in the deployment platform:
+Non-PayHere API rate limits use shared, atomic counters through Upstash Redis. Existing PayHere route code is intentionally left unchanged and still uses the legacy process-local limiter. Configure these server-only environment variables locally and in the deployment platform:
 
 - `UPSTASH_REDIS_REST_URL` — Upstash Redis REST endpoint
 - `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis REST token
 - `TRUST_PROXY_HEADERS=true` — optional; enable only if the hosting proxy reliably overwrites `X-Forwarded-For`. The app prefers `X-Real-IP` when available.
 
-In production, requests fail closed with HTTP 503 if the shared rate limiter is missing or unavailable. The process-local fallback is for development only. Never expose the Redis token to client-side code.
+For handlers using the shared limiter, production requests fail closed with HTTP 503 if Redis is missing or unavailable. The process-local fallback is for development only. Existing PayHere handlers are excluded by design in this change and need a separate review before claiming all endpoints have distributed rate limiting. Never expose the Redis token to client-side code.
 
 ## Application areas
 

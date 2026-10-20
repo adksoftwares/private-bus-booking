@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 
 // High-performance in-memory cache for trip seat statuses
 interface CachedTripSeats {
@@ -21,7 +21,7 @@ export function invalidateTripSeatsCache(tripId?: string) {
 
 export async function GET(req: Request) {
   try {
-    await enforceRateLimit(req, 'seat_status', 60, 60);
+    await enforceSharedRateLimit(req, 'seat_status', 60, 60);
 
     const { searchParams } = new URL(req.url);
     const tripId = searchParams.get('tripId');

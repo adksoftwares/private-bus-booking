@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedRequestClient } from '@/lib/supabase/authenticated-client';
 import { requireTripOwnership } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { updateTripSchema, formatZodError } from '@/lib/validation/schemas';
 import { Database, Json } from '@/types/database';
 
@@ -55,7 +55,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ tripId: 
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ tripId: string }> }) {
   try {
-    await enforceRateLimit(req, 'update_trip', 30, 60);
+    await enforceSharedRateLimit(req, 'update_trip', 30, 60);
     const { tripId } = await params;
 
     // 1. Authoritative Server Ownership Check (Caller must be Admin or the Trip's verified Owner)

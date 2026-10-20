@@ -26,7 +26,7 @@ export async function GET(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    enforceRateLimit(req, 'update_profile', 20, 60);
+    await enforceRateLimit(req, 'update_profile', 20, 60);
     const user = await requireAuth(req);
     const body = await req.json();
 

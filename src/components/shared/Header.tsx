@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Link, useRouter, usePathname } from '@/i18n/routing';
-import { useLocale } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { 
   Bus, 
   Ticket, 
@@ -25,6 +25,7 @@ export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
   const currentLocale = useLocale();
+  const t = useTranslations('nav');
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -85,57 +86,60 @@ export default function Header() {
           </div>
         </Link>
 
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-1 lg:gap-2">
-          <Link 
-            href="/" 
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              isHomeActive 
-                ? 'bg-slate-100 text-slate-900 font-black' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
-          >
-            <Search className="w-3.5 h-3.5 text-slate-400" />
-            <span>Find Buses</span>
-          </Link>
+        {/* Desktop Navigation Links - Modern Segmented Capsule Bar */}
+        <nav className="hidden md:flex items-center gap-2">
+          {/* Segmented Capsule Control for Core Customer Journey */}
+          <div className="bg-slate-100/90 p-1 rounded-full border border-slate-200/80 flex items-center shadow-2xs">
+            <Link 
+              href="/" 
+              className={`px-4 py-2 rounded-full text-xs font-bold transition-all duration-200 flex items-center gap-2 select-none ${
+                isHomeActive 
+                  ? 'bg-white text-slate-900 shadow-xs font-black ring-1 ring-slate-900/5' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              <Search className={`w-3.5 h-3.5 transition-colors ${isHomeActive ? 'text-orange-600 stroke-[2.5]' : 'text-slate-400'}`} />
+              <span>{t('findBuses')}</span>
+            </Link>
 
-          <Link 
-            href="/bookings" 
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              isBookingsActive 
-                ? 'bg-slate-100 text-slate-900 font-black' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
-          >
-            <Ticket className="w-3.5 h-3.5 text-slate-400" />
-            <span>{user ? 'My Bookings' : 'Find My Ticket'}</span>
-          </Link>
+            <Link 
+              href="/bookings" 
+              className={`px-4 py-2 rounded-full text-xs font-bold transition-all duration-200 flex items-center gap-2 select-none ${
+                isBookingsActive 
+                  ? 'bg-white text-slate-900 shadow-xs font-black ring-1 ring-slate-900/5' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              <Ticket className={`w-3.5 h-3.5 transition-colors ${isBookingsActive ? 'text-orange-600 stroke-[2.5]' : 'text-slate-400'}`} />
+              <span>{user ? t('myBookings') : t('findTicket')}</span>
+            </Link>
+          </div>
 
           {(isOwner || isAdmin) && (
             <Link 
               href="/owner/buses" 
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                 isOwnerActive 
-                  ? 'bg-orange-50 text-orange-700 border border-orange-200' 
+                  ? 'bg-orange-50 text-orange-700 border border-orange-200 shadow-2xs' 
                   : 'text-slate-700 hover:text-orange-600 hover:bg-orange-50/60'
               }`}
             >
               <Briefcase className="w-3.5 h-3.5 text-orange-600" />
-              <span>Fleet Manager</span>
+              <span>{t('manageFleet')}</span>
             </Link>
           )}
 
           {isStaff && (
             <Link 
               href="/scan" 
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                 isScanActive
-                  ? 'bg-slate-900 text-orange-400 ring-2 ring-orange-500'
+                  ? 'bg-slate-900 text-orange-400 ring-2 ring-orange-500 shadow-2xs'
                   : 'bg-slate-900 text-slate-200 hover:text-orange-400'
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5 text-orange-500" />
-              <span>Conductor Terminal</span>
+              <span>{t('conductorTerminal')}</span>
             </Link>
           )}
         </nav>
@@ -335,32 +339,32 @@ export default function Header() {
             <Link 
               href="/" 
               className={`p-3 rounded-xl flex items-center gap-3 transition ${
-                isHomeActive ? 'bg-orange-50 text-orange-600' : 'hover:bg-slate-50'
+                isHomeActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
               }`}
             >
               <Search className="w-4 h-4 text-orange-600" />
-              <span>Find Buses</span>
+              <span>{t('findBuses')}</span>
             </Link>
 
             <Link 
               href="/bookings" 
               className={`p-3 rounded-xl flex items-center gap-3 transition ${
-                isBookingsActive ? 'bg-orange-50 text-orange-600' : 'hover:bg-slate-50'
+                isBookingsActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
               }`}
             >
               <Ticket className="w-4 h-4 text-orange-600" />
-              <span>{user ? 'My Bookings' : 'Find My Ticket (Guest Lookup)'}</span>
+              <span>{user ? t('myBookings') : `${t('findTicket')} (Guest Lookup)`}</span>
             </Link>
 
             {(isOwner || isAdmin) && (
               <Link 
                 href="/owner/buses" 
                 className={`p-3 rounded-xl flex items-center gap-3 transition ${
-                  isOwnerActive ? 'bg-orange-50 text-orange-600' : 'hover:bg-slate-50'
+                  isOwnerActive ? 'bg-orange-50 text-orange-600 font-bold' : 'hover:bg-slate-50'
                 }`}
               >
                 <Briefcase className="w-4 h-4 text-orange-600" />
-                <span>Fleet & Trips Manager</span>
+                <span>{t('manageFleet')}</span>
               </Link>
             )}
 
@@ -368,11 +372,11 @@ export default function Header() {
               <Link 
                 href="/scan" 
                 className={`p-3 rounded-xl flex items-center gap-3 transition ${
-                  isScanActive ? 'bg-slate-900 text-orange-400' : 'bg-slate-900 text-slate-200'
+                  isScanActive ? 'bg-slate-900 text-orange-400 font-bold' : 'bg-slate-900 text-slate-200'
                 }`}
               >
                 <ShieldCheck className="w-4 h-4 text-orange-500" />
-                <span>Conductor Verification Terminal</span>
+                <span>{t('conductorTerminal')}</span>
               </Link>
             )}
 

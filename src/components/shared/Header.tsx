@@ -162,7 +162,7 @@ export default function Header() {
             </button>
             <button
               onClick={() => handleLanguageChange('ta')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer text-[11px] ${
+              className={`min-h-9 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                 currentLocale === 'ta' 
                   ? 'bg-white text-slate-900 shadow-xs font-black' 
                   : 'text-slate-500 hover:text-slate-900'
@@ -173,7 +173,7 @@ export default function Header() {
             </button>
             <button
               onClick={() => handleLanguageChange('si')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer text-[11px] ${
+              className={`min-h-9 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                 currentLocale === 'si' 
                   ? 'bg-white text-slate-900 shadow-xs font-black' 
                   : 'text-slate-500 hover:text-slate-900'
@@ -406,13 +406,13 @@ export default function Header() {
               </button>
               <button 
                 onClick={() => handleLanguageChange('ta')} 
-                className={`px-3 py-1.5 rounded-lg font-bold ${currentLocale === 'ta' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`min-h-10 px-3 py-2 rounded-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${currentLocale === 'ta' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 தமிழ்
               </button>
               <button 
                 onClick={() => handleLanguageChange('si')} 
-                className={`px-3 py-1.5 rounded-lg font-bold ${currentLocale === 'si' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`min-h-10 px-3 py-2 rounded-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${currentLocale === 'si' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 සිංහල
               </button>

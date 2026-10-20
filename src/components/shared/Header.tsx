@@ -118,6 +118,7 @@ export default function Header() {
           {(isOwner || isAdmin) && (
             <Link 
               href="/owner/buses" 
+              aria-current={isOwnerActive ? "page" : undefined}
               className={`px-3.5 py-2 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                 isOwnerActive 
                   ? 'bg-orange-50 text-orange-700 border border-orange-200 shadow-2xs' 
@@ -132,6 +133,7 @@ export default function Header() {
           {isStaff && (
             <Link 
               href="/scan" 
+              aria-current={isScanActive ? "page" : undefined}
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                 isScanActive
                   ? 'bg-slate-900 text-orange-400 ring-2 ring-orange-500 shadow-2xs'

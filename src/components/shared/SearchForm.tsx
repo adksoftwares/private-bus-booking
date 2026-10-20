@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useRouter } from '@/i18n/routing';
 import { MapPin, Navigation, Calendar, ArrowLeftRight, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { BusStand } from '@/types/location';
 import { searchBusStands, MAJOR_TRANSPORT_HUBS } from '@/data/sriLankaBusStands';
+
+
+const subscribeToNoChanges = () => () => {};
+const getServerDateSnapshot = () => '';
+const getLocalDateString = (daysFromToday: number) => {
+  const value = new Date();
+  value.setDate(value.getDate() + daysFromToday);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+};
 
 export default function SearchForm() {
   const router = useRouter();
@@ -14,20 +23,9 @@ export default function SearchForm() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
-  // Resolve local dates after mount to avoid server/client timezone hydration mismatches.
-  const [todayStr, setTodayStr] = useState('');
-  const [tomorrowStr, setTomorrowStr] = useState('');
-  useEffect(() => {
-    const toLocalDateString = (value: Date) =>
-      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-    const today = new Date();
-    const todayValue = toLocalDateString(today);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    setTodayStr(todayValue);
-    setTomorrowStr(toLocalDateString(tomorrow));
-    setDate((current) => current || todayValue);
-  }, []);
+  // Hydration-safe local dates: the server snapshot is empty; the browser supplies local calendar dates.
+  const todayStr = useSyncExternalStore(subscribeToNoChanges, () => getLocalDateString(0), getServerDateSnapshot);
+  const tomorrowStr = useSyncExternalStore(subscribeToNoChanges, () => getLocalDateString(1), getServerDateSnapshot);
 
   const [date, setDate] = useState('');
 
@@ -58,12 +56,13 @@ export default function SearchForm() {
       setValidationError("Origin and destination cities cannot be the same.");
       return;
     }
-    if (!date) {
+    const travelDate = date || todayStr;
+    if (!travelDate) {
       setValidationError("Please select your travel date.");
       return;
     }
 
-    router.push(`/search?from=${encodeURIComponent(cleanFrom.toLowerCase())}&to=${encodeURIComponent(cleanTo.toLowerCase())}&date=${encodeURIComponent(date)}`);
+    router.push(`/search?from=${encodeURIComponent(cleanFrom.toLowerCase())}&to=${encodeURIComponent(cleanTo.toLowerCase())}&date=${encodeURIComponent(travelDate)}`);
   };
 
   const handleSwap = () => {
@@ -291,7 +290,7 @@ export default function SearchForm() {
                   onClick={() => setDate(todayStr)}
                   disabled={!todayStr}
                   aria-pressed={date === todayStr}
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${date === todayStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${(date || todayStr) === todayStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Today
                 </button>
@@ -300,7 +299,7 @@ export default function SearchForm() {
                   onClick={() => setDate(tomorrowStr)}
                   disabled={!tomorrowStr}
                   aria-pressed={date === tomorrowStr}
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${date === tomorrowStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded cursor-pointer transition ${(date || todayStr) === tomorrowStr ? 'bg-orange-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   Tomorrow
                 </button>
@@ -311,7 +310,7 @@ export default function SearchForm() {
               required 
               min={todayStr}
               className="w-full outline-none text-slate-900 text-sm sm:text-base font-black bg-transparent cursor-pointer"
-              value={date} 
+              value={date || todayStr} 
               onChange={e => setDate(e.target.value)}
             />
           </div>

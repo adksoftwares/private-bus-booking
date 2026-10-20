@@ -309,7 +309,8 @@ export default function SearchForm() {
               type="date" 
               required 
               min={todayStr}
-              id="search-travel-date"\n              className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent cursor-pointer"
+              id="search-travel-date"
+              className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent cursor-pointer"
               value={date || todayStr} 
               onChange={e => setDate(e.target.value)}
             />

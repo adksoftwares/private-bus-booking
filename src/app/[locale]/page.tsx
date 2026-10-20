@@ -92,11 +92,11 @@ export default function Home() {
       <main className="flex-1 flex flex-col items-center">
         
         {/* Commercial Hero Section */}
-        <section className="w-full bg-slate-900 text-white pt-16 pb-24 px-4 text-center relative overflow-hidden border-b border-slate-800">
+        <section className="relative w-full overflow-hidden border-b border-slate-800 bg-slate-900 px-4 pb-20 pt-12 text-center text-white sm:pb-24 sm:pt-16">
           {/* Subtle grid pattern overlay */}
           <div className="absolute inset-0 opacity-5 bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none"></div>
 
-          <div className="max-w-4xl mx-auto relative z-10">
+          <div className="relative z-10 mx-auto max-w-4xl">
             
             {/* National Intercity Network Tag */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-orange-500/15 text-orange-400 border border-orange-500/30 mb-6">
@@ -104,16 +104,16 @@ export default function Home() {
               <span>{tHero('badge')}</span>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl md:text-6xl font-black mb-5 tracking-tight leading-tight text-white">
+            <h1 className="mb-5 text-3xl font-bold leading-tight tracking-tight text-white sm:text-5xl md:text-6xl">
               {tHero('title')}
             </h1>
 
-            <p className="text-sm sm:text-base md:text-lg text-slate-300 max-w-2xl mx-auto mb-6 leading-relaxed font-normal">
+            <p className="mx-auto mb-6 max-w-2xl text-sm font-normal leading-relaxed text-slate-300 sm:text-base md:text-lg">
               {tHero('subtitle')}
             </p>
 
             {/* Micro Trust Indicators */}
-            <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 text-xs font-semibold text-slate-400">
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3 text-xs font-medium text-slate-300 sm:gap-x-8">
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span>Verified Operators</span>
@@ -132,7 +132,7 @@ export default function Home() {
         </section>
 
         {/* Primary Search Interface Overlapping Hero */}
-        <section className="w-full max-w-5xl mx-auto px-4 -mt-10 sm:-mt-12 z-20">
+        <section className="z-20 mx-auto -mt-8 w-full max-w-5xl px-4 sm:-mt-12">
           <SearchForm />
         </section>
 
@@ -144,7 +144,7 @@ export default function Home() {
               return (
                 <div 
                   key={i} 
-                  className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_2px_10px_rgba(18,31,43,0.035)] hover:shadow-md hover:border-orange-200 transition-all duration-200 flex flex-col justify-between"
+                  className="flex flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_2px_10px_rgba(18,31,43,0.035)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-md motion-reduce:transform-none"
                 >
                   <div>
                     <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center mb-3">
@@ -187,7 +187,7 @@ export default function Home() {
               <Link
                 key={i}
                 href={`/search?from=${encodeURIComponent(r.from.toLowerCase())}&to=${encodeURIComponent(r.to.toLowerCase())}&date=${todayStr}`}
-                className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-[0_2px_10px_rgba(18,31,43,0.035)] hover:shadow-md hover:border-orange-300 transition-all duration-200 group flex flex-col justify-between text-left"
+                className="group flex flex-col justify-between rounded-2xl border border-slate-200/90 bg-white p-5 text-left shadow-[0_2px_10px_rgba(18,31,43,0.035)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-md motion-reduce:transform-none"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-3">

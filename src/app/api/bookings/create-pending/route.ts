@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, HttpError } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { createPendingBookingSchema } from '@/lib/validation/schemas';
 import { createPendingBooking } from '@/lib/services/booking-service';
 import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
@@ -8,7 +8,7 @@ import { invalidateTripSeatsCache } from '@/app/api/seats/status/route';
 export async function POST(req: Request) {
   try {
     // 1. Abuse & Brute-Force Rate Limiting
-    await enforceRateLimit(req, 'create-pending', 20, 60);
+    await enforceSharedRateLimit(req, 'create-pending', 20, 60);
 
     // 2. Validate input schema
     const body = await req.json();

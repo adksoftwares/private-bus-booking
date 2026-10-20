@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireStaffOrAdmin } from '@/lib/auth-server';
-import { enforceRateLimit } from '@/lib/rate-limiter';
+import { enforceSharedRateLimit } from '@/lib/rate-limiter';
 import { verifyTicketSchema, formatZodError } from '@/lib/validation/schemas';
 import { atomicBoardTicket } from '@/lib/services/booking-service';
 
 export async function POST(req: Request) {
   try {
     // 1. Rate limiting
-    await enforceRateLimit(req, 'verify_ticket', 60, 60);
+    await enforceSharedRateLimit(req, 'verify_ticket', 60, 60);
 
     // 2. Server-verified Authentication (Bearer token verified, no client staffUid spoofing)
     const staffUser = await requireStaffOrAdmin(req);

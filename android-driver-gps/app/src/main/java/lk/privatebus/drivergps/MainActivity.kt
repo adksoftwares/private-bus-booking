@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.net.Uri
 import android.view.ViewGroup
 import android.widget.*
 import androidx.core.content.ContextCompat
@@ -50,14 +51,14 @@ class MainActivity:Activity(){
   if(android.os.Build.VERSION.SDK_INT>=33&&ContextCompat.checkSelfPermission(this,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)needed.add(Manifest.permission.POST_NOTIFICATIONS)
   if(needed.isNotEmpty())requestPermissions(needed.toTypedArray(),41) else startTrip()
  }
- override fun onRequestPermissionsResult(code:Int,permissions:Array<out String>,results:IntArray){super.onRequestPermissionsResult(code,permissions,results);if(code==41&&results.isNotEmpty()&&results[0]==PackageManager.PERMISSION_GRANTED)startTrip()else status.text="Location permission is required."}
+ override fun onRequestPermissionsResult(code:Int,permissions:Array<out String>,results:IntArray){super.onRequestPermissionsResult(code,permissions,results);if (code == 41 && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) startTrip() else status.text="Precise location permission is required."}
  private fun startTrip(){
   val token=TokenStore.get(this);val id=tripId.text.toString().trim()
-  if(token.isNullOrBlank()){status.text="Please sign in first.";return};if(id.isBlank()){status.text="Enter your assigned trip ID.";return}
+  if(token.isNullOrBlank()){status.text="Please sign in first.";return};if(id.isBlank()){status.text="Enter your assigned trip ID.";return};if(!BuildConfig.APP_BASE_URL.startsWith("https://")){status.text="Set the production HTTPS APP_BASE_URL before building this app.";return}
   status.text="Starting trip GPS…"
   executor.execute{try{
    val body=JSONObject().put("action","start").toString().toRequestBody("application/json".toMediaType())
-   val req=Request.Builder().url(BuildConfig.APP_BASE_URL.trimEnd('/')+"/api/tracking/"+id).addHeader("Authorization","Bearer "+token).post(body).build()
+   val req=Request.Builder().url(BuildConfig.APP_BASE_URL.trimEnd('/')+"/api/tracking/"+Uri.encode(id)).addHeader("Authorization","Bearer "+token).post(body).build()
    client.newCall(req).execute().use{res->val json=JSONObject(res.body?.string()?: "{}");if(!res.isSuccessful)throw IllegalStateException(json.optString("error","Trip start rejected."))}
    runOnUiThread{ContextCompat.startForegroundService(this,Intent(this,GpsTrackingService::class.java).putExtra("trip_id",id));status.text="GPS service running. Keep its notification visible."}
   }catch(e:Exception){runOnUiThread{status.text=e.message?:"Unable to start tracking."}}}
@@ -65,8 +66,11 @@ class MainActivity:Activity(){
  private fun finishTrip(){
   val token=TokenStore.get(this);val id=tripId.text.toString().trim()
   if(token.isNullOrBlank()||id.isBlank()){status.text="Sign in and enter the trip ID first.";return}
-  status.text="Finishing trip…"
+  status.text="Uploading pending GPS points before finishing…"
   executor.execute{try{
+   val deadline = System.currentTimeMillis() + 30000L
+   while (TokenStore.pendingCount(this) > 0 && System.currentTimeMillis() < deadline) Thread.sleep(1000)
+   if (TokenStore.pendingCount(this) > 0) throw IllegalStateException("GPS points are still waiting to upload. Keep tracking active and try Finish again when the connection is restored.")
    val body=JSONObject().put("action","stop").toString().toRequestBody("application/json".toMediaType())
    val req=Request.Builder().url(BuildConfig.APP_BASE_URL.trimEnd('/')+"/api/tracking/"+id).addHeader("Authorization","Bearer "+token).post(body).build()
    client.newCall(req).execute().use{res->val json=JSONObject(res.body?.string()?: "{}");if(!res.isSuccessful)throw IllegalStateException(json.optString("error","Unable to finish trip."))}

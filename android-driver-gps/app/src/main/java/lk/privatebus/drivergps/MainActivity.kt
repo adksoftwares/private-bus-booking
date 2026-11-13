@@ -40,7 +40,7 @@ class MainActivity:Activity(){
   executor.execute{try{
    val body=JSONObject().put("email",mail).put("password",pass).toString().toRequestBody("application/json".toMediaType())
    val req=Request.Builder().url(BuildConfig.SUPABASE_URL.trimEnd('/')+"/auth/v1/token?grant_type=password").addHeader("apikey",BuildConfig.SUPABASE_ANON_KEY).post(body).build()
-   client.newCall(req).execute().use{res->val json=JSONObject(res.body?.string()?: "{}");if(!res.isSuccessful)throw IllegalStateException(json.optString("msg",json.optString("message","Sign in failed.")));val token=json.optString("access_token");if(token.isBlank())throw IllegalStateException("No access token returned.");TokenStore.save(this,token)}
+   client.newCall(req).execute().use{res->val json=JSONObject(res.body?.string()?: "{}");if(!res.isSuccessful)throw IllegalStateException(json.optString("msg",json.optString("message","Sign in failed.")));val token=json.optString("access_token");if(token.isBlank())throw IllegalStateException("No access token returned.");TokenStore.save(this,token,json.optString("refresh_token"))}
    runOnUiThread{status.text="Signed in. Enter a trip assigned to this account."}
   }catch(e:Exception){runOnUiThread{status.text=e.message?:"Sign in failed."}}}
  }

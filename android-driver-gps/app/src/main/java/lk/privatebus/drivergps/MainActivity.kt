@@ -66,8 +66,11 @@ class MainActivity:Activity(){
  private fun finishTrip(){
   val token=TokenStore.get(this);val id=tripId.text.toString().trim()
   if(token.isNullOrBlank()||id.isBlank()){status.text="Sign in and enter the trip ID first.";return}
-  status.text="Finishing trip…"
+  status.text="Uploading pending GPS points before finishing…"
   executor.execute{try{
+   val deadline = System.currentTimeMillis() + 30000L
+   while (TokenStore.pendingCount(this) > 0 && System.currentTimeMillis() < deadline) Thread.sleep(1000)
+   if (TokenStore.pendingCount(this) > 0) throw IllegalStateException("GPS points are still waiting to upload. Keep tracking active and try Finish again when the connection is restored.")
    val body=JSONObject().put("action","stop").toString().toRequestBody("application/json".toMediaType())
    val req=Request.Builder().url(BuildConfig.APP_BASE_URL.trimEnd('/')+"/api/tracking/"+id).addHeader("Authorization","Bearer "+token).post(body).build()
    client.newCall(req).execute().use{res->val json=JSONObject(res.body?.string()?: "{}");if(!res.isSuccessful)throw IllegalStateException(json.optString("error","Unable to finish trip."))}

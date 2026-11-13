@@ -23,11 +23,15 @@ export async function POST(req: Request, context: Context) {
       return NextResponse.json({ error: 'GPS updates are accepted only while the trip is live.' }, { status: 409 });
     }
     const now = new Date().toISOString();
+    const suppliedRecordedAt = body.recordedAt ? new Date(String(body.recordedAt)) : null;
+    const recordedAt = suppliedRecordedAt && Number.isFinite(suppliedRecordedAt.getTime()) && suppliedRecordedAt.getTime() <= Date.now() + 120000 && suppliedRecordedAt.getTime() >= Date.now() - 7 * 24 * 60 * 60 * 1000
+      ? suppliedRecordedAt.toISOString()
+      : now;
     const point = {
       trip_id: tripId, owner_id: trip.owner_id, latitude, longitude, accuracy_m: accuracy,
-      speed_kmh: speed === null ? null : Math.max(0, Math.min(speed * 3.6, 250)),
-      heading: heading === null ? null : ((heading % 360) + 360) % 360,
-      recorded_at: now, source_user_id: user.uid
+      speed_kmh: speed === null || !Number.isFinite(speed) ? null : Math.max(0, Math.min(speed * 3.6, 250)),
+      heading: heading === null || !Number.isFinite(heading) ? null : ((heading % 360) + 360) % 360,
+      recorded_at: recordedAt, source_user_id: user.uid
     };
     const { error: insertError } = await db.from('trip_tracking_points').insert(point);
     if (insertError) throw new Error('Unable to save GPS location.');

@@ -55,7 +55,7 @@ export default function DriverTrackingPage() {
     }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
   }, [sendLocation]);
 
-  const control = async (action: 'start' | 'pause' | 'resume' | 'stop') => {
+  const control = useCallback(async (action: 'start' | 'pause' | 'resume' | 'stop') => {
     setBusy(true);
     try {
       const res = await authFetch('/api/tracking/' + encodeURIComponent(tripId), {
@@ -73,7 +73,7 @@ export default function DriverTrackingPage() {
       setMessage(action === 'stop' ? 'Trip tracking completed.' : 'Tracking status: ' + json.status);
     } catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
-  };
+  }, [authFetch, refresh, startWatch]);
 
   useEffect(() => {
     if (!user) return;

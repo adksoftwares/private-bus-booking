@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.net.Uri
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
@@ -53,7 +54,8 @@ class GpsTrackingService:Service(){
     while(true){
      val item=TokenStore.peek(this)?:break
      val queuedTrip=item.optString("trip_id")
-     val point=item.optJSONObject("point")\n     if(point==null){TokenStore.removeFirst(this);continue}
+     val point=item.optJSONObject("point")
+     if(point==null){TokenStore.removeFirst(this);continue}
      var response=postPoint(queuedTrip,point,token)
      if(response==401){if(!refreshSession())break;token=TokenStore.get(this)?:"";response=postPoint(queuedTrip,point,token)}
      if(response !in 200..299){updateNotice("GPS upload waiting (HTTP "+response+"). Pending points: "+TokenStore.pendingCount(this));break}
@@ -63,7 +65,7 @@ class GpsTrackingService:Service(){
   }
  }
  private fun postPoint(id:String,point:JSONObject,bearer:String):Int{
-  val req=Request.Builder().url(BuildConfig.APP_BASE_URL.trimEnd('/')+"/api/tracking/"+id+"/location").addHeader("Authorization","Bearer "+bearer).post(point.toString().toRequestBody("application/json".toMediaType())).build()
+  val req=Request.Builder().url(BuildConfig.APP_BASE_URL.trimEnd('/')+"/api/tracking/"+Uri.encode(id)+"/location").addHeader("Authorization","Bearer "+bearer).post(point.toString().toRequestBody("application/json".toMediaType())).build()
   return client.newCall(req).execute().use{it.code}
  }
  private fun refreshSession():Boolean{

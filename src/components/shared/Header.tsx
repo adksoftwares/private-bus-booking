@@ -17,7 +17,8 @@ import {
   ChevronDown,
   Calendar,
   Settings,
-  Plus
+  Plus,
+  MapPin
 } from 'lucide-react';
 
 export default function Header() {
@@ -127,6 +128,26 @@ export default function Header() {
             >
               <Briefcase className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('manageFleet')}</span>
+            </Link>
+          )}
+
+          {isOwner && (
+            <Link
+              href="/owner/tracking"
+              className="px-3 py-2 rounded-full text-xs font-bold text-slate-700 hover:text-orange-600 hover:bg-orange-50/60 flex items-center gap-1.5"
+            >
+              <MapPin className="w-3.5 h-3.5 text-orange-600" />
+              <span>Live Tracking</span>
+            </Link>
+          )}
+
+          {role === 'Conductor' && (
+            <Link
+              href="/gps"
+              className="px-3 py-2 rounded-full text-xs font-bold text-slate-700 hover:text-orange-600 hover:bg-orange-50/60 flex items-center gap-1.5"
+            >
+              <MapPin className="w-3.5 h-3.5 text-orange-600" />
+              <span>Trip GPS</span>
             </Link>
           )}
 

@@ -1,6 +1,14 @@
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUser } from '@/lib/auth-server';
 
+export function normalizePhone(value: string): string {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('94') && digits.length === 11) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return `94${digits.slice(1)}`;
+  if (digits.length === 9) return `94${digits}`;
+  return digits;
+}
+
 export class TrackingAccessError extends Error {
   constructor(public statusCode: number, message: string) { super(message); this.name = 'TrackingAccessError'; }
 }

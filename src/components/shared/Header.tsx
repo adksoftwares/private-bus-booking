@@ -131,7 +131,7 @@ export default function Header() {
             </Link>
           )}
 
-          {isOwner && (
+          {(isOwner || isAdmin) && (
             <Link
               href="/owner/tracking"
               className="px-3 py-2 rounded-full text-xs font-bold text-slate-700 hover:text-orange-600 hover:bg-orange-50/60 flex items-center gap-1.5"

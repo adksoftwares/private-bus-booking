@@ -31,6 +31,9 @@ export async function authorizeTripTracking(req: Request, tripId: string, mode: 
   if (contact?.contact_type === 'supervisor' && (mode === 'view' || contact.can_control_tracking)) {
     return { db, trip, user, access: 'supervisor' as const };
   }
+  if (contact?.contact_type === 'driver' && mode !== 'view') {
+    return { db, trip, user, access: 'driver' as const };
+  }
   const { data: assignment } = await db.from('staff_trip_assignments')
     .select('assigned_role').eq('trip_id', tripId).eq('staff_id', user.uid).maybeSingle();
   if (assignment && (mode === 'view' || assignment.assigned_role === 'Driver')) {

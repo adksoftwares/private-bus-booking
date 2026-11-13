@@ -29,8 +29,8 @@ export async function POST(req: Request, context: Context) {
       : now;
     const point = {
       trip_id: tripId, owner_id: trip.owner_id, latitude, longitude, accuracy_m: accuracy,
-      speed_kmh: speed === null ? null : Math.max(0, Math.min(speed * 3.6, 250)),
-      heading: heading === null ? null : ((heading % 360) + 360) % 360,
+      speed_kmh: speed === null || !Number.isFinite(speed) ? null : Math.max(0, Math.min(speed * 3.6, 250)),
+      heading: heading === null || !Number.isFinite(heading) ? null : ((heading % 360) + 360) % 360,
       recorded_at: recordedAt, source_user_id: user.uid
     };
     const { error: insertError } = await db.from('trip_tracking_points').insert(point);

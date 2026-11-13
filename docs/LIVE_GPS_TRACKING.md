@@ -29,7 +29,7 @@
 ## Native Android screen-off GPS
 The android-driver-gps folder contains a native Android app and a location foreground service.
 1. Open android-driver-gps in Android Studio.
-2. Build with `./gradlew assembleDebug -PAPP_BASE_URL=https://YOUR-PRODUCTION-DOMAIN`. The Supabase URL and publishable key are configured for the linked Supabase project; use only the public key in the mobile app.
+2. Run the GitHub Actions workflow **Build Android Driver GPS APK** and provide the deployed website HTTPS origin. The workflow builds the APK and uploads it as an artifact. The Supabase URL and publishable key are configured for the linked Supabase project; use only the public key in the mobile app.
 3. Build and install the APK on the assigned bus phone.
 4. Driver signs in with the existing Conductor account, enters the assigned trip ID, grants precise location and notification permissions, and presses Start trip GPS.
 5. Android shows an ongoing notification and the foreground service sends location points to the authenticated tracking API. Driver presses Finish trip at destination.

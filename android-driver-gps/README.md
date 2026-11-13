@@ -23,7 +23,7 @@ The foreground location service continues receiving location updates while the s
 
 ## Security
 - Login uses Supabase Auth password grant with the public anon key.
-- Access token is stored using Android EncryptedSharedPreferences.
+- Access and refresh tokens are stored using Android EncryptedSharedPreferences; the service refreshes expired access tokens during long trips. GPS points are queued in encrypted local preferences and replayed when connectivity returns.
 - All tracking requests carry the signed-in account's bearer token.
 - Server verifies that the Conductor account is assigned to the requested trip before accepting GPS.
 - Never embed SUPABASE_SERVICE_ROLE_KEY in this Android project.

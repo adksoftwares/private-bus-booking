@@ -56,8 +56,8 @@ class GpsTrackingService:Service(){
      val queuedTrip=item.optString("trip_id")
      val point=item.optJSONObject("point")
      if(point==null){TokenStore.removeFirst(this);continue}
-     var response=postPoint(queuedTrip,point,token)
-     if(response==401){if(!refreshSession())break;token=TokenStore.get(this)?:"";response=postPoint(queuedTrip,point,token)}
+     var response = try { postPoint(queuedTrip, point, token) } catch (_: Exception) { updateNotice("GPS upload paused by network. Pending points: " + TokenStore.pendingCount(this)); break }
+     if(response==401){if(!refreshSession())break;token=TokenStore.get(this)?:"";response = try { postPoint(queuedTrip, point, token) } catch (_: Exception) { updateNotice("GPS upload paused by network. Pending points: " + TokenStore.pendingCount(this)); break }}
      if(response !in 200..299){updateNotice("GPS upload waiting (HTTP "+response+"). Pending points: "+TokenStore.pendingCount(this));break}
      TokenStore.removeFirst(this)
     }

@@ -53,7 +53,7 @@ class GpsTrackingService:Service(){
     while(true){
      val item=TokenStore.peek(this)?:break
      val queuedTrip=item.optString("trip_id")
-     val point=item.optJSONObject("point")?:run{TokenStore.removeFirst(this);continue}
+     val point=item.optJSONObject("point")\n     if(point==null){TokenStore.removeFirst(this);continue}
      var response=postPoint(queuedTrip,point,token)
      if(response==401){if(!refreshSession())break;token=TokenStore.get(this)?:"";response=postPoint(queuedTrip,point,token)}
      if(response !in 200..299){updateNotice("GPS upload waiting (HTTP "+response+"). Pending points: "+TokenStore.pendingCount(this));break}

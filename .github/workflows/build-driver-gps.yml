@@ -1,0 +1,59 @@
+name: Build Android Driver GPS APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_base_url:
+        description: "Deployed HTTPS origin of the Private Bus Booking website (for example https://booking.example.com)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Validate website origin
+        env:
+          APP_BASE_URL: ${{ inputs.app_base_url }}
+        shell: bash
+        run: |
+          if [[ ! "$APP_BASE_URL" =~ ^https://[^/]+/?$ ]]; then
+            echo "APP_BASE_URL must be a production HTTPS origin without a path."
+            exit 1
+          fi
+
+      - name: Build debug APK
+        env:
+          APP_BASE_URL: ${{ inputs.app_base_url }}
+        run: gradle -p android-driver-gps assembleDebug -PAPP_BASE_URL="$APP_BASE_URL"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-bus-driver-gps-debug-apk
+          path: android-driver-gps/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

@@ -133,7 +133,7 @@ export default function SearchForm() {
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
           
           {/* Origin (From) Field */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
+          <div className={`flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative transition-all ${showFrom ? 'z-40' : 'z-20'}`}>
             <label htmlFor="search-origin" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('from')}</span>
@@ -162,8 +162,8 @@ export default function SearchForm() {
             
             {/* Auto-suggest dropdown */}
             {showFrom && fromSuggestions.length > 0 && (
-              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-96 bg-white/98 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1.5 divide-y divide-slate-100 ring-1 ring-slate-900/5">
-                <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1.5 divide-y divide-slate-100 ring-1 ring-slate-900/10">
+                <li aria-hidden="true" className="sticky top-0 z-10 px-3.5 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100 border-b border-slate-200">
                   Select Origin Station / Stand
                 </li>
                 {fromSuggestions.map(stand => (
@@ -172,7 +172,7 @@ export default function SearchForm() {
                     id={`search-origin-option-${stand.id}`}
                     role="option"
                     aria-selected={highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id)}
-                    className={`px-3.5 py-3 min-h-12 cursor-pointer text-slate-800 transition-colors flex items-start justify-between gap-2 ${highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    className={`px-3.5 py-3 min-h-12 cursor-pointer text-slate-800 transition-colors flex items-start justify-between gap-2 bg-white ${highlightedFromIndex === fromSuggestions.findIndex(item => item.id === stand.id) ? '!bg-orange-50' : 'hover:!bg-orange-50'}`}
                     onMouseDown={() => { setFrom(stand.name); setShowFrom(false); setHighlightedFromIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
@@ -211,7 +211,7 @@ export default function SearchForm() {
           </div>
 
           {/* Destination (To) Field */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative transition-all">
+          <div className={`flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative transition-all ${showTo ? 'z-40' : 'z-10'}`}>
             <label htmlFor="search-destination" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <Navigation className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('to')}</span>
@@ -240,8 +240,8 @@ export default function SearchForm() {
 
             {/* Auto-suggest dropdown */}
             {showTo && toSuggestions.length > 0 && (
-              <ul id="search-destination-options" role="listbox" className="absolute top-full left-0 w-full sm:w-96 bg-white/98 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1.5 divide-y divide-slate-100 ring-1 ring-slate-900/5">
-                <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+              <ul id="search-destination-options" role="listbox" className="absolute top-full left-0 w-full sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1.5 divide-y divide-slate-100 ring-1 ring-slate-900/10">
+                <li aria-hidden="true" className="sticky top-0 z-10 px-3.5 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100 border-b border-slate-200">
                   Select Destination Station / Stand
                 </li>
                 {toSuggestions.map(stand => (
@@ -250,7 +250,7 @@ export default function SearchForm() {
                     id={`search-destination-option-${stand.id}`}
                     role="option"
                     aria-selected={highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id)}
-                    className={`px-3.5 py-3 min-h-12 cursor-pointer text-slate-800 transition-colors flex items-start justify-between gap-2 ${highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id) ? 'bg-orange-50' : 'hover:bg-orange-50'}`}
+                    className={`px-3.5 py-3 min-h-12 cursor-pointer text-slate-800 transition-colors flex items-start justify-between gap-2 bg-white ${highlightedToIndex === toSuggestions.findIndex(item => item.id === stand.id) ? '!bg-orange-50' : 'hover:!bg-orange-50'}`}
                     onMouseDown={() => { setTo(stand.name); setShowTo(false); setHighlightedToIndex(-1); }}
                   >
                     <div className="flex items-start gap-2.5">
@@ -276,7 +276,7 @@ export default function SearchForm() {
           </div>
 
           {/* Travel Date Field + Quick Date Chips */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all">
+          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all relative z-0">
             <div className="flex items-center justify-between mb-1">
               <label htmlFor="search-travel-date" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-orange-600" />
@@ -319,7 +319,7 @@ export default function SearchForm() {
           {/* Primary Search CTA Button */}
           <button 
             type="submit" 
-            className="min-h-12 bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 sm:px-8 rounded-xl sm:rounded-2xl transition-colors shadow-sm hover:shadow-md text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+            className="relative z-0 min-h-12 bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 sm:px-8 rounded-xl sm:rounded-2xl transition-colors shadow-sm hover:shadow-md text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
           >
             <Search className="w-5 h-5 stroke-[2.5]" />
             <span>{t('searchBuses')}</span>

@@ -133,7 +133,7 @@ export default function SearchForm() {
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
           
           {/* Origin (From) Field */}
-          <div className={`flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative transition-all ${showFrom ? 'z-40' : 'z-20'}`}>
+          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 relative z-30 transition-all">
             <label htmlFor="search-origin" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('from')}</span>
@@ -198,7 +198,7 @@ export default function SearchForm() {
           </div>
 
           {/* Swap Origin/Destination Button */}
-          <div className="flex items-center justify-center -my-2 md:my-0 md:-mx-2 z-10">
+          <div className="flex items-center justify-center -my-2 md:my-0 md:-mx-2 z-25">
             <button
               type="button"
               onClick={handleSwap}
@@ -211,7 +211,7 @@ export default function SearchForm() {
           </div>
 
           {/* Destination (To) Field */}
-          <div className={`flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative transition-all ${showTo ? 'z-40' : 'z-10'}`}>
+          <div className="flex-1 bg-slate-50/80 hover:bg-slate-50 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 border border-slate-200/80 rounded-2xl p-3 relative z-20 transition-all">
             <label htmlFor="search-destination" className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <Navigation className="w-3.5 h-3.5 text-orange-600" />
               <span>{t('to')}</span>
@@ -276,7 +276,7 @@ export default function SearchForm() {
           </div>
 
           {/* Travel Date Field + Quick Date Chips */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all relative z-0">
+          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all relative z-10">
             <div className="flex items-center justify-between mb-1">
               <label htmlFor="search-travel-date" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-orange-600" />

@@ -162,7 +162,7 @@ export default function SearchForm() {
             
             {/* Auto-suggest dropdown */}
             {showFrom && fromSuggestions.length > 0 && (
-              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+              <ul id="search-origin-options" role="listbox" className="absolute top-full left-0 w-full sm:w-96 bg-white/98 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1.5 divide-y divide-slate-100 ring-1 ring-slate-900/5">
                 <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Origin Station / Stand
                 </li>
@@ -240,7 +240,7 @@ export default function SearchForm() {
 
             {/* Auto-suggest dropdown */}
             {showTo && toSuggestions.length > 0 && (
-              <ul id="search-destination-options" role="listbox" className="absolute top-full left-0 w-full sm:w-88 bg-white border border-slate-200 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1 divide-y divide-slate-100">
+              <ul id="search-destination-options" role="listbox" className="absolute top-full left-0 w-full sm:w-96 bg-white/98 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-2xl mt-2 z-50 max-h-72 overflow-y-auto text-left py-1.5 divide-y divide-slate-100 ring-1 ring-slate-900/5">
                 <li aria-hidden="true" className="px-3.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
                   Select Destination Station / Stand
                 </li>

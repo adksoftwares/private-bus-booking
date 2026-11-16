@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Link } from '@/i18n/routing';
+import AuthGuardCard from '@/components/shared/AuthGuardCard';
 import { Booking } from '@/types/booking';
 import { Trip } from '@/types/trip';
 import { 
@@ -119,22 +120,16 @@ export default function ScannerPage() {
 
   if (!user || !isStaff) {
     return (
-      <div className="max-w-md mx-auto my-20 p-8 text-center bg-white border border-red-200 rounded-3xl shadow-xl">
-        <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <AlertCircle className="w-7 h-7" />
-        </div>
-        <h2 className="text-2xl font-black text-slate-800 mb-2">Access Restricted</h2>
-        <p className="text-slate-500 text-xs sm:text-sm mb-6 leading-relaxed">
-          This verification terminal is strictly restricted to verified bus conductors, registered fleet operators, and authorized platform administrators.
-        </p>
-        <Link 
-          href="/" 
-          className="inline-flex items-center justify-center gap-2 w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3.5 rounded-xl transition shadow-md text-sm"
-        >
-          <Home className="w-4 h-4" />
-          <span>Return to Homepage</span>
-        </Link>
-      </div>
+      <AuthGuardCard
+        icon={QrCode}
+        badgeText={t('terminalBadge')}
+        title={t('title')}
+        description="This verification terminal is strictly restricted to verified bus conductors, registered fleet operators, and authorized platform administrators."
+        loginRedirect="/scan"
+        loginButtonText="Sign In as Conductor / Staff"
+        secondaryHref="/"
+        secondaryLabel="Return to Homepage"
+      />
     );
   }
 

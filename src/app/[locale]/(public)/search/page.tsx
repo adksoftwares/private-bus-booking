@@ -19,7 +19,10 @@ import {
   ChevronRight,
   Armchair,
   Star,
-  ArrowUpDown
+  ArrowUpDown,
+  AlertCircle,
+  RefreshCw,
+  Search
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { matchLocation } from '@/data/sriLankaBusStands';
@@ -37,6 +40,8 @@ function SearchResults() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [busRatings, setBusRatings] = useState<Record<string, { rating: number; count: number }>>({});
   const [loading, setLoading] = useState(Boolean(from && to && date));
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryTrigger, setRetryTrigger] = useState(0);
 
   // Filters & Sorting
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'ac' | 'semi' | 'vip'>('all');
@@ -46,12 +51,18 @@ function SearchResults() {
   if (prevQueryKey !== currentQueryKey) {
     setPrevQueryKey(currentQueryKey);
     setLoading(Boolean(from && to && date));
+    setFetchError(null);
   }
 
   useEffect(() => {
-    if (!from || !to || !date) return;
+    if (!from || !to || !date) {
+      setLoading(false);
+      return;
+    }
 
     let isCancelled = false;
+    setLoading(true);
+    setFetchError(null);
 
     // Fetch bus ratings lookup table in parallel
     fetch('/api/ratings')
@@ -64,7 +75,13 @@ function SearchResults() {
 
     // Query trips by date from API
     fetch(`/api/trips?date=${encodeURIComponent(date)}`)
-      .then(res => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to fetch available bus schedules.');
+        }
+        return data;
+      })
       .then((data) => {
         if (isCancelled) return;
         const allTrips: Trip[] = data.trips || [];
@@ -103,12 +120,14 @@ function SearchResults() {
         }
 
         setTrips(matched);
+        setFetchError(null);
         setLoading(false);
       })
       .catch((err) => {
         console.error("Error fetching trips:", err);
         if (!isCancelled) {
           setTrips([]);
+          setFetchError(err.message || 'Unable to connect to bus schedule service. Please try again.');
           setLoading(false);
         }
       });
@@ -116,7 +135,7 @@ function SearchResults() {
     return () => {
       isCancelled = true;
     };
-  }, [from, to, date]);
+  }, [from, to, date, retryTrigger]);
 
   // Quick Date Navigation
   const handleDateShift = (days: number) => {
@@ -337,6 +356,53 @@ function SearchResults() {
             </div>
           ))}
         </div>
+      ) : fetchError ? (
+        /* Error State with Retry CTA */
+        <div className="bg-white p-10 sm:p-14 rounded-3xl border border-rose-200 text-center max-w-xl mx-auto my-8 shadow-xs">
+          <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-7 h-7 stroke-[2]" />
+          </div>
+          <h2 className="text-xl font-black text-slate-900 mb-2">Unable to Load Schedules</h2>
+          <p className="text-xs sm:text-sm text-slate-500 mb-6 leading-relaxed">
+            {fetchError}
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                setLoading(true);
+                setFetchError(null);
+                setRetryTrigger(prev => prev + 1);
+              }}
+              className="w-full sm:w-auto px-5 py-2.5 bg-orange-600 hover:bg-orange-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer inline-flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Search</span>
+            </button>
+            <Link 
+              href="/"
+              className="w-full sm:w-auto px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+            >
+              Change Route Search
+            </Link>
+          </div>
+        </div>
+      ) : (!from || !to || !date) ? (
+        /* Missing search parameters */
+        <div className="bg-white p-10 sm:p-14 rounded-3xl border border-slate-200 text-center max-w-xl mx-auto my-8 shadow-xs">
+          <div className="w-14 h-14 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Search className="w-7 h-7 stroke-[2]" />
+          </div>
+          <h2 className="text-xl font-black text-slate-900 mb-2">Find Your Bus Journey</h2>
+          <p className="text-xs sm:text-sm text-slate-500 mb-6 leading-relaxed">
+            Please enter your departure city, destination, and travel date to see available intercity express buses.
+          </p>
+          <Link 
+            href="/"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-orange-600 hover:bg-orange-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+          >
+            <span>Search Buses on Homepage &rarr;</span>
+          </Link>
+        </div>
       ) : processedTrips.length === 0 ? (
         /* Empty State with Helpful Next Steps */
         <div className="bg-white p-10 sm:p-14 rounded-3xl border border-slate-200 text-center max-w-xl mx-auto my-8 shadow-xs">
@@ -350,7 +416,7 @@ function SearchResults() {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
               onClick={() => handleDateShift(1)}
-              className="w-full sm:w-auto px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+              className="w-full sm:w-auto px-5 py-2.5 bg-orange-600 hover:bg-orange-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
             >
               Check Next Day &rarr;
             </button>

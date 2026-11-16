@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from '@/i18n/routing';
-import { MapPin, Navigation, Calendar, ArrowLeftRight, Search } from 'lucide-react';
+import { MapPin, Navigation, Calendar, CalendarDays, ArrowLeftRight, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { BusStand } from '@/types/location';
 import { searchBusStands, MAJOR_TRANSPORT_HUBS } from '@/data/sriLankaBusStands';
@@ -27,6 +27,22 @@ export default function SearchForm() {
   const tomorrowStr = getSriLankaDateString(1);
 
   const [date, setDate] = useState('');
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenCalendar = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      if (dateInputRef.current) {
+        if ('showPicker' in HTMLInputElement.prototype) {
+          dateInputRef.current.showPicker();
+        } else {
+          dateInputRef.current.focus();
+        }
+      }
+    } catch {
+      dateInputRef.current?.focus();
+    }
+  };
 
   const [fromSuggestions, setFromSuggestions] = useState<BusStand[]>([]);
   const [toSuggestions, setToSuggestions] = useState<BusStand[]>([]);
@@ -276,14 +292,17 @@ export default function SearchForm() {
           </div>
 
           {/* Travel Date Field + Quick Date Chips */}
-          <div className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all relative z-10">
+          <div 
+            onClick={handleOpenCalendar}
+            className="flex-1 bg-slate-50/80 hover:bg-white focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-300 border border-slate-200/80 rounded-2xl p-3 transition-all relative z-10 cursor-pointer group"
+          >
             <div className="flex items-center justify-between mb-1">
-              <label htmlFor="search-travel-date" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+              <label htmlFor="search-travel-date" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
                 <Calendar className="w-3.5 h-3.5 text-orange-600" />
                 <span>{t('date')}</span>
               </label>
               {/* Quick Date Chips */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                 <button
                   type="button"
                   onClick={() => setDate(todayStr)}
@@ -304,16 +323,30 @@ export default function SearchForm() {
                 </button>
               </div>
             </div>
-            <input 
-              type="date" 
-              required 
-              min={todayStr}
-              id="search-travel-date"
-              suppressHydrationWarning
-              className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent cursor-pointer"
-              value={date || todayStr} 
-              onChange={e => setDate(e.target.value)}
-            />
+
+            <div className="flex items-center justify-between gap-2">
+              <input 
+                ref={dateInputRef}
+                type="date" 
+                required 
+                min={todayStr}
+                id="search-travel-date"
+                suppressHydrationWarning
+                onClick={handleOpenCalendar}
+                className="w-full min-h-8 outline-none text-slate-900 text-base sm:text-base font-semibold bg-transparent cursor-pointer"
+                value={date || todayStr} 
+                onChange={e => setDate(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleOpenCalendar}
+                title="Open Calendar to choose travel date"
+                aria-label="Open Calendar"
+                className="p-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-600 transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+              >
+                <CalendarDays className="w-4 h-4 stroke-[2.2]" />
+              </button>
+            </div>
           </div>
 
           {/* Primary Search CTA Button */}

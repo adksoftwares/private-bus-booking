@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authorizeTripTracking, trackingError } from '@/lib/tracking-access';
+import type { Database } from '@/types/database';
 type Context = { params: Promise<{ tripId: string }> };
 
 export async function GET(req: Request, context: Context) {
@@ -34,7 +35,7 @@ export async function POST(req: Request, context: Context) {
     if (action === 'stop' && (!current || current.status === 'completed')) return NextResponse.json({ error: 'There is no active trip to finish.' }, { status: 409 });
     const now = new Date().toISOString();
     const status = action === 'start' || action === 'resume' ? 'live' : action === 'pause' ? 'paused' : 'completed';
-    const patch: Record<string, unknown> = { trip_id: tripId, bus_id: trip.bus_id, owner_id: trip.owner_id, status, updated_at: now };
+    const patch: Database['public']['Tables']['trip_tracking_sessions']['Insert'] = { trip_id: tripId, bus_id: trip.bus_id, owner_id: trip.owner_id, status, updated_at: now };
     if (action === 'start') { patch.started_at = now; patch.started_by = user.uid; }
     if (action === 'stop') { patch.ended_at = now; patch.ended_by = user.uid; }
     const { error } = await db.from('trip_tracking_sessions').upsert(patch, { onConflict: 'trip_id' });
